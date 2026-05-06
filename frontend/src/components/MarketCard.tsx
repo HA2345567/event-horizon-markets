@@ -1,108 +1,94 @@
-import { Link } from "react-router-dom";
-import { TrendingUp, TrendingDown, Radio, CheckCircle2 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { formatUsd, timeUntil } from "@/lib/api";
-import type { ApiMarket } from "@/lib/api-types";
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { cn } from '@/lib/utils';
+import { formatUsd } from '@/lib/api';
+import type { ApiMarket } from '@/lib/api-types';
 
-export function MarketCard({
-  market,
-  compact = false,
-}: {
+interface MarketCardProps {
   market: ApiMarket;
   compact?: boolean;
-}) {
-  const yesPct = Math.round(market.yesPrice * 100);
-  const noPct = 100 - yesPct;
-  const trend = market.yesPrice - 0.5;
-  const trendUp = trend >= 0;
+}
+
+export function MarketCard({ market, compact = false }: MarketCardProps) {
+  const yesProb = Math.round(market.yesPrice * 100);
+  const noProb = 100 - yesProb;
+  
+  // Calculate multipliers (1 / price)
+  const yesMultiplier = (1 / market.yesPrice).toFixed(2);
+  const noMultiplier = (1 / (1 - market.yesPrice)).toFixed(2);
+
+  // Determine top-level entity label (e.g., from question or category)
+  const entityLabel = market.category.toUpperCase();
 
   return (
     <Link
       to={`/markets/${market.id}`}
-      className="group relative flex flex-col overflow-hidden rounded-[24px] border border-border/30 bg-[#121212] transition-all hover:border-border-strong hover:shadow-2xl active:scale-[0.99]"
+      className={cn(
+        "group relative flex flex-col w-full bg-[#0B0B0B] border border-white/5 rounded-[24px] p-6 transition-all duration-300 hover:bg-[#111111] hover:border-white/10 hover:shadow-2xl",
+        compact ? "max-w-sm" : ""
+      )}
     >
-      {/* Banner Image Area */}
-      <div className="relative h-32 w-full overflow-hidden">
-        {market.imageUrl ? (
-          <img src={market.imageUrl} alt="" className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover:scale-105" />
-        ) : (
-          <div className="h-full w-full bg-gradient-to-br from-surface to-background opacity-40" />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#121212] via-transparent to-transparent" />
-        
-        {/* Top Badges - Absolute on Image */}
-        <div className="absolute left-4 top-4 z-20">
-          <span className="rounded-full bg-black/60 backdrop-blur-md px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white/90 border border-white/10 shadow-lg">
-            {market.category}
-          </span>
+      {/* Header: Label */}
+      <div className="flex items-center gap-3 mb-4">
+        <span className="text-[11px] font-black tracking-widest text-[#888888] uppercase">
+          {entityLabel}
+        </span>
+      </div>
+
+      {/* Title */}
+      <h3 className="text-[17px] font-bold text-white leading-snug mb-8 line-clamp-2 min-h-[3rem]">
+        {market.question}
+      </h3>
+
+      {/* Outcomes Grid */}
+      <div className="flex flex-col gap-6 mb-8">
+        {/* Yes Row */}
+        <div className="flex items-center justify-between group/row">
+          <div className="flex flex-col gap-1 flex-1 mr-8">
+            <span className="text-base font-semibold text-white/95">Yes</span>
+            <div className="h-[3px] w-full bg-[#1A1A1A] rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-[#00FFBD] transition-all duration-1000 ease-out shadow-[0_0_8px_rgba(0,255,189,0.2)]" 
+                style={{ width: `${yesProb}%` }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-5">
+            <span className="text-[13px] font-medium text-[#555555]">{yesMultiplier}x</span>
+            <div className="min-w-[68px] h-[36px] rounded-full border border-[#00FFBD]/30 flex items-center justify-center bg-[#00FFBD]/5">
+              <span className="text-[14px] font-bold text-white">{yesProb}%</span>
+            </div>
+          </div>
         </div>
-        <div className="absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-full bg-success/20 backdrop-blur-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-success border border-success/30 shadow-lg">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Verified
+
+        {/* No Row */}
+        <div className="flex items-center justify-between group/row">
+          <div className="flex flex-col gap-1 flex-1 mr-8">
+            <span className="text-base font-semibold text-white/95">No</span>
+            <div className="h-[3px] w-full bg-[#1A1A1A] rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-[#FF4F4F] transition-all duration-1000 ease-out" 
+                style={{ width: `${noProb}%` }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-5">
+            <span className="text-[13px] font-medium text-[#555555]">{noMultiplier}x</span>
+            <div className="min-w-[68px] h-[36px] rounded-full border border-white/10 flex items-center justify-center bg-white/5">
+              <span className="text-[14px] font-bold text-white">{noProb}%</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-col p-5">
-        {/* Question */}
-        <h3
-          className={cn(
-            "font-display text-white leading-tight tracking-tight line-clamp-2 min-h-[2.5rem]",
-            compact ? "text-lg" : "text-xl",
-          )}
-        >
-          {market.question}
-        </h3>
-
-        {/* Outcome Boxes */}
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          {/* YES Box */}
-          <div className="flex flex-col rounded-2xl bg-[#1A1A1A] border border-white/5 py-2.5 px-4 transition-colors group-hover:border-success/20">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">Yes</div>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <span className="font-display text-3xl font-semibold text-success">
-                {yesPct}<span className="text-xl ml-0.5">¢</span>
-              </span>
-              <div className={cn(trendUp ? "text-success" : "text-destructive")}>
-                {trendUp ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-              </div>
-            </div>
-          </div>
-
-          {/* NO Box */}
-          <div className="flex flex-col rounded-2xl bg-[#1A1A1A] border border-white/5 py-2.5 px-4 transition-colors group-hover:border-destructive/20">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">No</div>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <span className="font-display text-3xl font-semibold text-destructive">
-                {noPct}<span className="text-xl ml-0.5">¢</span>
-              </span>
-              <div className={cn(!trendUp ? "text-success" : "text-destructive")}>
-                {!trendUp ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Probability Bar */}
-        <div className="mt-5">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#1A1A1A]">
-            <div
-              className="h-full rounded-full bg-success transition-all duration-700 ease-out shadow-[0_0_8px_rgba(34,197,94,0.3)]"
-              style={{ width: `${yesPct}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Stats Footer */}
-        <div className="mt-5 flex items-center justify-between text-[11px] font-mono tracking-tight text-muted-foreground/50">
-          <div className="flex items-center gap-4">
-            <span>{formatUsd(market.volume)} 24h</span>
-            <span>{formatUsd(market.liquidity)} liq</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Radio className="h-3 w-3 text-success/70" />
-            {timeUntil(market.endsAt)}
-          </div>
-        </div>
+      {/* Footer */}
+      <div className="flex items-center justify-between mt-auto pt-2">
+        <span className="text-[12px] font-medium text-[#555555]">
+          {formatUsd(market.volume)} vol
+        </span>
+        <span className="text-[12px] font-medium text-[#555555]">
+          {market.participants || 1} market
+        </span>
       </div>
     </Link>
   );

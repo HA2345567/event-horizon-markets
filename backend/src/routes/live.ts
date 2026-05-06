@@ -12,7 +12,7 @@ const router = express.Router();
 
 // Cache the last sync time to avoid hammering Kalshi
 let lastSyncTime = 0;
-const SYNC_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
+const SYNC_INTERVAL_MS = 1 * 60 * 1000; // 1 minute
 
 async function ensureLiveMarkets() {
   const now = Date.now();
@@ -38,7 +38,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 
     const {
       status = 'active',
-      limit = '50',
+      limit = '1000',
       offset = '0',
       sort = 'volume',
       search,

@@ -29,7 +29,7 @@ export class SolanaService {
     }
 
     this.programId = new PublicKey(process.env.PROGRAM_ID || 'By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT');
-    
+
     // Initialize Anchor Provider
     const wallet = new anchor.Wallet(this.agentKeypair);
     const provider = new anchor.AnchorProvider(this.connection, wallet, {
@@ -90,7 +90,7 @@ export class SolanaService {
         this.agentKeypair,
         amount * 1_000_000 // 6 decimals
       );
-      
+
       console.log(`✅ Airdropped ${amount} USDC to ${targetWallet}. TX: ${txSig}`);
       return txSig;
     } catch (err: any) {
@@ -109,7 +109,7 @@ export class SolanaService {
   async createMarketOnChain(marketData: { id: string; endsAt: Date }) {
     try {
       console.log(`[SolanaService] Creating market on-chain: ${marketData.id}`);
-      
+
       const marketIdNum = this.getMarketIdNum(marketData.id);
       const marketIdBytes = Buffer.alloc(4);
       marketIdBytes.writeUInt32LE(marketIdNum, 0);

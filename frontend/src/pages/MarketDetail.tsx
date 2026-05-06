@@ -120,7 +120,7 @@ export default function MarketDetail() {
   const { balance, isLoadingBalance } = useHelioraWallet();
 
   const { livePrice: socketPrice, orderbook: socketOrderbook, status: wsStatus } = useMarketSocket(id);
-  
+
   const market = data?.market;
   const pricePoints = market?.pricePoints ?? [];
 
@@ -163,13 +163,13 @@ export default function MarketDetail() {
       toast.error("Please connect your wallet first");
       return;
     }
-    
+
     try {
       setIsBuying(true);
       toast.loading("Preparing transaction...", { id: "trade" });
 
       const programId = new PublicKey("By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT");
-      
+
       // We use a mock anchor provider to build the ix
       const provider = new anchor.AnchorProvider(
         connection,
@@ -180,13 +180,13 @@ export default function MarketDetail() {
         },
         { preflightCommitment: "confirmed" }
       );
-      
+
       const program = new anchor.Program(IDL, provider);
 
       // Derive PDAs - Using pure Uint8Array to avoid Buffer polyfill issues in browser
       const idStr = id || "";
       const cleanId = idStr.replace(/-/g, '');
-      
+
       let marketIdNum = 0;
       if (cleanId.length >= 8) {
         // Parse the first 8 hex chars (4 bytes) as a u32
@@ -235,9 +235,9 @@ export default function MarketDetail() {
         .transaction();
 
       toast.loading("Awaiting wallet approval...", { id: "trade" });
-      
+
       const signature = await sendTransaction(tx, connection);
-      
+
       toast.loading("Confirming on-chain...", { id: "trade" });
       await connection.confirmTransaction(signature, "confirmed");
 
@@ -330,7 +330,7 @@ export default function MarketDetail() {
 
       toast.loading("Awaiting approval...", { id: "claim" });
       const signature = await sendTransaction(tx, connection);
-      
+
       toast.loading("Finalizing redemption...", { id: "claim" });
       await connection.confirmTransaction(signature, "confirmed");
 
@@ -758,13 +758,13 @@ export default function MarketDetail() {
               <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-ring-strong">
                 <div className="flex items-center justify-between border-b border-border px-4 py-1.5 bg-background/40">
                   <div className="flex gap-1 p-0.5">
-                    <button 
+                    <button
                       onClick={() => setIsSell(false)}
                       className={cn("px-3 py-1 text-[11px] font-bold uppercase rounded-md transition", !isSell ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}
                     >
                       Buy
                     </button>
-                    <button 
+                    <button
                       onClick={() => setIsSell(true)}
                       className={cn("px-3 py-1 text-[11px] font-bold uppercase rounded-md transition", isSell ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}
                     >
@@ -998,7 +998,7 @@ function PolymarketChart({ pricePoints, live, range }: { pricePoints: ApiPricePo
         ts: p.ts,
       };
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pricePoints, range]);
 
   // Inject live price at the end
@@ -1016,7 +1016,7 @@ function PolymarketChart({ pricePoints, live, range }: { pricePoints: ApiPricePo
     const yesVal = payload.find((p) => p.dataKey === "yes")?.value;
     const noVal = payload.find((p) => p.dataKey === "no")?.value;
     const volVal = payload.find((p) => p.dataKey === "volume")?.value;
-    
+
     return (
       <div className="rounded-lg border border-border bg-background/95 px-3 py-2.5 shadow-ring backdrop-blur">
         <div className="font-mono text-[10px] text-muted-foreground mb-1">{label}</div>
@@ -1187,12 +1187,12 @@ function CandleChart({ candles, live }: { candles: Candle[]; live: number }) {
   const maxC = candles.length ? Math.max(...candles.map(c => c.h)) : live;
   const minP = Math.min(minC, live);
   const maxP = Math.max(maxC, live);
-  
+
   let span = Math.max(0.02, maxP - minP);
   const domainMin = Math.max(0, minP - span * 0.15);
   const domainMax = Math.min(1, maxP + span * 0.15);
   span = domainMax - domainMin;
-  
+
   const scaleY = (p: number) => PAD + (1 - (p - domainMin) / span) * (H - PAD * 2);
   const lastY = scaleY(live);
 
@@ -1389,8 +1389,8 @@ function AgentsPanel({ marketId, yesPrice }: { marketId: string; yesPrice: numbe
         action: conf > 75
           ? (yesBias ? "Bought YES" : "Bought NO")
           : conf > 60
-          ? "Monitoring"
-          : "Idle",
+            ? "Monitoring"
+            : "Idle",
       };
     });
     return out;
@@ -1674,7 +1674,7 @@ function ResolutionRules({ market }: { market: ApiMarket }) {
           {" "}Disputes may be opened within 48 hours by staking PREDICT tokens.
         </p>
       )}
-      
+
       <div className="grid gap-3 md:grid-cols-3">
         {[
           { icon: ShieldCheck, t: "Trustless", d: "On-chain oracle attests outcome cryptographically." },

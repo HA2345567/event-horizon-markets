@@ -1,0 +1,36 @@
+steps:
+  # Build the frontend
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Build Frontend'
+    args: [
+      'build',
+      '-f', 'frontend/Dockerfile',
+      '--build-arg', 'VITE_API_URL=https://heliora-backend-40377961468.asia-east1.run.app',
+      '--build-arg', 'VITE_PRIVY_APP_ID=cmooj9sxq009x0djo8i0uld15',
+      '-t', 'gcr.io/oneclaw-486705/heliora-frontend',
+      'frontend'
+    ]
+
+  # Push the image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Push Frontend'
+    args: ['push', 'gcr.io/oneclaw-486705/heliora-frontend']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Deploy Frontend'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'heliora-frontend'
+      - '--image'
+      - 'gcr.io/oneclaw-486705/heliora-frontend'
+      - '--region'
+      - 'asia-east1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+
+images:
+  - 'gcr.io/oneclaw-486705/heliora-frontend'

@@ -28,4 +28,16 @@ pub enum PredictionMarketError {
     UnauthorizedResolution,
     #[msg("Outcome index out of bounds")]
     OutcomeIndexOutOfBounds,
+    #[msg("Unauthorized agent attempt")]
+    UnauthorizedAgent,
+    #[msg("Agent is inactive")]
+    AgentInactive,
+    #[msg("Bet limit exceeded for agent")]
+    BetLimitExceeded,
+    #[msg("Daily loss limit exceeded for agent")]
+    DailyLossLimitExceeded,
+    #[msg("Proposal has already expired")]
+    ProposalExpired,
+    #[msg("Dispute window has closed")]
+    DisputeWindowClosed,
 }

@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
-use crate::state::{Market, GlobalConfig, ResolutionSource, OracleVote};
+use crate::state::*;
 
 #[derive(Accounts)]
 #[instruction(
@@ -117,6 +117,8 @@ pub struct InitializeGlobalConfig<'info> {
     
     #[account(mut)]
     pub authority: Signer<'info>,
+
+    pub heliora_mint: Account<'info, Mint>,
     
     pub system_program: Program<'info, System>,
 }
@@ -428,4 +430,103 @@ pub struct ClaimRewards<'info> {
     pub user_winning_outcome_ata: Account<'info, TokenAccount>,
     
     pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeStakingPool<'info> {
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + StakingPool::INIT_SPACE,
+        seeds = [b"staking_pool", heliora_mint.key().as_ref()],
+        bump
+    )]
+    pub pool: Account<'info, StakingPool>,
+
+    pub heliora_mint: Account<'info, Mint>,
+
+    #[account(
+        init,
+        payer = authority,
+        token::mint = heliora_mint,
+        token::authority = pool,
+        seeds = [b"staking_vault", heliora_mint.key().as_ref()],
+        bump
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct StakeTokens<'info> {
+    #[account(mut)]
+    pub pool: Account<'info, StakingPool>,
+
+    #[account(
+        init_if_needed,
+        payer = user,
+        space = 8 + UserStake::INIT_SPACE,
+        seeds = [b"user_stake", user.key().as_ref(), pool.key().as_ref()],
+        bump
+    )]
+    pub user_stake: Account<'info, UserStake>,
+
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(mut)]
+    pub user_token_account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub pool_vault: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(proposal_id: u32)]
+pub struct CreateProposal<'info> {
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + GovernanceProposal::INIT_SPACE,
+        seeds = [b"proposal", proposal_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub proposal: Account<'info, GovernanceProposal>,
+
+    #[account(mut)]
+    pub creator: Signer<'info>,
+
+    #[account(
+        constraint = user_stake.amount >= 1000_000_000, // Requires 1000 HELIORA staked to create proposal
+        seeds = [b"user_stake", creator.key().as_ref(), pool.key().as_ref()],
+        bump = user_stake.bump
+    )]
+    pub user_stake: Account<'info, UserStake>,
+
+    pub pool: Account<'info, StakingPool>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CastVote<'info> {
+    #[account(mut)]
+    pub proposal: Account<'info, GovernanceProposal>,
+
+    pub voter: Signer<'info>,
+
+    #[account(
+        seeds = [b"user_stake", voter.key().as_ref(), pool.key().as_ref()],
+        bump = user_stake.bump
+    )]
+    pub user_stake: Account<'info, UserStake>,
+
+    pub pool: Account<'info, StakingPool>,
 }

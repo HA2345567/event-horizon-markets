@@ -14,10 +14,84 @@ pub mod heliora_prediction_market {
         let config = &mut ctx.accounts.config;
         config.authority = ctx.accounts.authority.key();
         config.treasury = ctx.accounts.authority.key();
+        config.heliora_mint = ctx.accounts.heliora_mint.key();
         config.protocol_fee_bps = 20;
         config.creator_fee_bps = 30;
         config.lp_fee_bps = 50;
         config.bump = ctx.bumps.config;
+        Ok(())
+    }
+
+    pub fn initialize_staking_pool(ctx: Context<InitializeStakingPool>) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+        pool.mint = ctx.accounts.heliora_mint.key();
+        pool.total_staked = 0;
+        pool.accumulated_fees_per_share = 0;
+        pool.bump = ctx.bumps.pool;
+        Ok(())
+    }
+
+    pub fn stake_tokens(ctx: Context<StakeTokens>, amount: u64) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+        let user_stake = &mut ctx.accounts.user_stake;
+        let now = Clock::get()?.unix_timestamp;
+
+        // Transfer HELIORA to pool vault
+        let cpi_accounts = anchor_spl::token::Transfer {
+            from: ctx.accounts.user_token_account.to_account_info(),
+            to: ctx.accounts.pool_vault.to_account_info(),
+            authority: ctx.accounts.user.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        anchor_spl::token::transfer(CpiContext::new(cpi_program, cpi_accounts), amount)?;
+
+        user_stake.owner = ctx.accounts.user.key();
+        user_stake.amount += amount;
+        user_stake.last_stake_timestamp = now;
+        user_stake.bump = ctx.bumps.user_stake;
+
+        pool.total_staked += amount;
+
+        Ok(())
+    }
+
+    pub fn create_proposal(
+        ctx: Context<CreateProposal>,
+        proposal_id: u32,
+        title: String,
+        description_hash: [u8; 32],
+        duration: i64,
+    ) -> Result<()> {
+        let proposal = &mut ctx.accounts.proposal;
+        let now = Clock::get()?.unix_timestamp;
+
+        proposal.creator = ctx.accounts.creator.key();
+        proposal.id = proposal_id;
+        proposal.title = title;
+        proposal.description_hash = description_hash;
+        proposal.votes_for = 0;
+        proposal.votes_against = 0;
+        proposal.end_date = now + duration;
+        proposal.executed = false;
+        proposal.bump = ctx.bumps.proposal;
+
+        Ok(())
+    }
+
+    pub fn cast_vote(ctx: Context<CastVote>, side: bool) -> Result<()> {
+        let proposal = &mut ctx.accounts.proposal;
+        let user_stake = &ctx.accounts.user_stake;
+        let now = Clock::get()?.unix_timestamp;
+
+        require!(now < proposal.end_date, PredictionMarketError::ProposalExpired);
+        
+        let weight = user_stake.amount;
+        if side {
+            proposal.votes_for += weight;
+        } else {
+            proposal.votes_against += weight;
+        }
+
         Ok(())
     }
 

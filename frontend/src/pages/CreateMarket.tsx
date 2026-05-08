@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { PageShell } from "@/components/layout/PageShell";
 import { api } from "@/lib/api";
 import { CATEGORIES, type MarketCategory, type ResolutionSource } from "@/lib/api-types";
-import { ArrowLeft, ArrowRight, Brain, Calendar, Check, CheckCircle2, Coins, Database, Loader2, Network, Sparkles, Zap } from "lucide-react";
+import { ArrowLeft, ArrowRight, Brain, Calendar, Check, CheckCircle2, Coins, Database, Gauge, Layers, Loader2, Network, Sparkles, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const TEMPLATES = [

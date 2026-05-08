@@ -14,9 +14,45 @@ pub enum ResolutionSource {
 pub struct GlobalConfig {
     pub authority: Pubkey,
     pub treasury: Pubkey,
+    pub heliora_mint: Pubkey,
     pub protocol_fee_bps: u16,
     pub creator_fee_bps: u16,
     pub lp_fee_bps: u16,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct StakingPool {
+    pub mint: Pubkey,
+    pub total_staked: u64,
+    pub accumulated_fees_per_share: u128, // Scaled for precision
+    pub total_fees_collected: u64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct UserStake {
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub reward_tally: u128,
+    pub last_stake_timestamp: i64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct GovernanceProposal {
+    pub creator: Pubkey,
+    pub id: u32,
+    #[max_len(64)]
+    pub title: String,
+    pub description_hash: [u8; 32],
+    pub votes_for: u64,
+    pub votes_against: u64,
+    pub end_date: i64,
+    pub executed: bool,
     pub bump: u8,
 }
 

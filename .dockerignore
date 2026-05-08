@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+**/node_modules
+dist
+**/dist
+packages
+backend
+programs
+supabase
+README.md
+cloudbuild.yaml

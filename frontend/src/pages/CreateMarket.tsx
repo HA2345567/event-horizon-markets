@@ -10,6 +10,13 @@ import { CATEGORIES, type MarketCategory, type ResolutionSource } from "@/lib/ap
 import { ArrowLeft, ArrowRight, Brain, Calendar, Check, CheckCircle2, Coins, Database, Loader2, Network, Sparkles, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const TEMPLATES = [
+  { id: 'pump', name: 'Pump.fun Launch', icon: Zap, question: "Will {token} reach $10M MC within 24h of launch?", res: 'AIOracle', cat: 'Memes' },
+  { id: 'meme', name: 'Meme Comparison', icon: Sparkles, question: "Will {coin1} outperform {coin2} this week?", res: 'Pyth', cat: 'Memes' },
+  { id: 'nft', name: 'NFT Floor', icon: Layers, question: "Will {collection} floor be above {price} SOL by Friday?", res: 'AIOracle', cat: 'NFTs' },
+  { id: 'defi', name: 'DeFi Volume', icon: Gauge, question: "Will Jupiter daily volume exceed $1B this week?", res: 'Switchboard', cat: 'DeFi' },
+];
+
 const RES: { key: ResolutionSource; label: string; icon: any; desc: string; best: string }[] = [
   { key: "Pyth", label: "Pyth", icon: Database, desc: "Auto-resolve from on-chain price feeds. Sub-slot settlement.", best: "Crypto, FX, commodities" },
   { key: "Switchboard", label: "Switchboard", icon: Network, desc: "Custom data feeds. APIs, sports stats, analytics.", best: "DeFi metrics, sports" },
@@ -20,13 +27,19 @@ const RES: { key: ResolutionSource; label: string; icon: any; desc: string; best
 export default function CreateMarket() {
   const navigate = useNavigate();
   const { connected } = useHelioraWallet();
-  const [step] = useState(1);
+  const [step, setStep] = useState(1);
   const [type, setType] = useState<"binary" | "categorical">("binary");
   const [question, setQuestion] = useState("Will SOL close above $300 by July 1?");
   const [cat, setCat] = useState<MarketCategory>("Crypto");
   const [resolution, setResolution] = useState<ResolutionSource>("Pyth");
   const [seed, setSeed] = useState(500);
   const [endDate, setEndDate] = useState("2026-07-01");
+
+  const applyTemplate = (t: typeof TEMPLATES[0]) => {
+    setQuestion(t.question);
+    setCat(t.cat as MarketCategory);
+    setResolution(t.res as ResolutionSource);
+  };
 
   const createMut = useMutation({
     mutationFn: () =>
@@ -63,6 +76,28 @@ export default function CreateMarket() {
         <div className="mt-10 grid gap-8 lg:grid-cols-[1fr_420px]">
           {/* LEFT FORM */}
           <div className="space-y-6">
+            {/* Template Picker */}
+            <div className="rounded-2xl border border-border bg-surface p-6 shadow-ring">
+              <div className="flex items-center gap-2 mb-4">
+                <Sparkles className="h-4 w-4 text-success" />
+                <h2 className="font-display text-lg">Solana-Native Templates</h2>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {TEMPLATES.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => applyTemplate(t)}
+                    className="flex flex-col items-center gap-2 rounded-xl border border-border bg-background p-4 text-center transition hover:border-foreground hover:bg-surface-elevated"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-surface">
+                      <t.icon className="h-5 w-5" />
+                    </div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider">{t.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Step 1 — Type */}
             <Section n={1} title="Market type" active={step >= 1}>
               <div className="grid gap-3 md:grid-cols-2">

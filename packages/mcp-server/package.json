@@ -1,29 +1,27 @@
 {
-  "name": "@heliora/agent-kit-plugin",
+  "name": "@heliora/mcp-server",
   "version": "1.0.1",
-  "description": "Official Heliora prediction market plugin for Solana Agent Kit",
+  "type": "module",
+  "description": "Heliora Prediction Market MCP Server",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "bin": {
+    "heliora-mcp": "dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
-    "test": "jest"
+    "start": "node dist/index.js"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.30.1",
+    "@modelcontextprotocol/sdk": "^1.0.1",
     "@solana/web3.js": "^1.95.3",
-    "@solana/spl-token": "^0.4.8"
+    "@coral-xyz/anchor": "^0.30.1",
+    "dotenv": "^16.4.5",
+    "axios": "^1.7.7"
   },
   "devDependencies": {
     "typescript": "^5.5.4",
     "@types/node": "^22.5.4"
   },
-  "keywords": [
-    "solana",
-    "agent-kit",
-    "prediction-market",
-    "heliora",
-    "ai"
-  ],
   "author": "Heliora",
   "license": "MIT",
   "publishConfig": {

@@ -18,6 +18,7 @@ import {
   Zap,
 } from "lucide-react";
 
+
 const COMPARISON = [
   ["Settlement time", "1–5 min", "1–3 hrs", "412ms"],
   ["KYC required", "No", "Full KYC", "No"],
@@ -75,10 +76,7 @@ export default function Landing() {
         <div className="absolute left-1/2 top-0 z-[1] h-[600px] w-[900px] -translate-x-1/2 rounded-full bg-foreground/[0.04] blur-3xl" />
         <div className="container relative z-10 pb-28 pt-20 md:pb-36 md:pt-28">
           <div className="mx-auto flex max-w-3xl flex-col items-center text-center animate-fade-up">
-            {/* <div className="badge-pill">
-              <Sparkles className="h-3 w-3" />
-              The world's first fully autonomous AI prediction protocol
-            </div> */}
+            
             <h1 className="mt-8 font-display text-4xl leading-[1.1] tracking-[-0.02em] text-gradient md:text-6xl">
               The first AI-native
               <br />
@@ -86,24 +84,29 @@ export default function Landing() {
               <br />
               on Solana
             </h1>
+            
+            <div className="mt-12 flex items-center justify-center gap-4 animate-fade-up" style={{ animationDelay: "150ms" }}>
+              <span className="font-mono text-[10px] font-bold uppercase tracking-[0.3em] text-muted-foreground/60">POWERED BY</span>
+              <img src="/solanaLogo.svg" alt="Solana" className="h-3.5 w-auto opacity-70 grayscale contrast-125 hover:opacity-100 hover:grayscale-0 transition-all duration-500" />
+            </div>
             <p className="mt-6 max-w-xl text-base font-light leading-relaxed text-muted-foreground/80 md:text-lg">
               An on-chain protocol where AI agents autonomously create, trade, and
               resolve markets using institutional data feeds and Gemini AI — with 
               zero human intervention, built on Solana.
             </p>
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <div className="mt-10 flex flex-col gap-4 sm:flex-row">
               <Link
                 to="/markets"
-                className="group relative flex items-center justify-center gap-2 rounded-lg bg-foreground px-8 py-3.5 text-sm font-semibold text-background shadow-[0_0_30px_-10px_rgba(255,255,255,0.3)] transition-all hover:scale-[1.02] hover:opacity-90 active:scale-[0.98]"
+                className="group relative flex items-center justify-center gap-2 rounded-full bg-[#F5F5F5] px-10 py-4 text-sm font-bold text-black transition-all hover:scale-[1.02] hover:bg-white active:scale-[0.98] shadow-lg shadow-white/5"
               >
                 Explore markets
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
               </Link>
               <Link
                 to="/markets/create"
-                className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-surface px-5 py-3 text-sm font-medium text-foreground shadow-ring transition hover:bg-surface-hover"
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 bg-white/5 px-10 py-4 text-sm font-semibold text-white transition-all hover:bg-white/10 hover:border-white/20 active:scale-[0.98]"
               >
-                Launch a market in 30s
+                Launch a market
               </Link>
             </div>
             {/* <div className="mt-10 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -136,9 +139,9 @@ export default function Landing() {
                 <Radio className="h-3.5 w-3.5 text-success animate-pulse-soft" />
                 Live order flow
               </div>
-              <span className="font-mono text-[11px] text-muted-foreground">
+              {/* <span className="font-mono text-[11px] text-muted-foreground">
                 helius · streaming
-              </span>
+              </span> */}
             </div>
             <div className="relative">
               <div className="flex animate-marquee gap-3 py-4">
@@ -232,9 +235,9 @@ export default function Landing() {
               </p>
             </div>
             <div className="relative overflow-hidden bg-background p-8">
-              <div className="absolute inset-0 bg-gradient-to-br from-success/10 via-transparent to-transparent opacity-50" />
+              {/* <div className="absolute inset-0 bg-gradient-to-br from-success/10 via-transparent to-transparent opacity-50" /> */}
               <div className="relative">
-                <div className="font-mono text-[11px] uppercase tracking-wider text-success">Heliora</div>
+                <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Heliora</div>
                 <div className="mt-3 font-display text-2xl text-foreground">Built for both</div>
                 <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                   412ms settlement, permissionless creation, native SPL collateral,
@@ -366,3 +369,4 @@ agent.streamMarket(markets[0].id, (snap) => {
     </PageShell>
   );
 }
+

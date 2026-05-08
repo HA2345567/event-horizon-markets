@@ -1,18 +1,18 @@
-# @solanaspredict/agent-kit-plugin
+# @heliora/agent-kit-plugin
 
 Drop-in plugin for [`solana-agent-kit`](https://github.com/sendaifun/solana-agent-kit) that gives autonomous on-chain AI agents access to **HELIORA** prediction markets — listing markets, placing bets, creating markets, reading portfolios, and triggering 5-agent oracle resolution.
 
 ## Install
 ```bash
-npm install @solanaspredict/agent-kit-plugin
+npm install @heliora/agent-kit-plugin
 # or
-yarn add @solanaspredict/agent-kit-plugin
+yarn add @heliora/agent-kit-plugin
 ```
 
 ## Usage
 ```ts
 import { SolanaAgentKit } from "solana-agent-kit";
-import { registerHelioraPlugin } from "@solanaspredict/agent-kit-plugin";
+import { registerHelioraPlugin } from "@heliora/agent-kit-plugin";
 
 const kit = new SolanaAgentKit(PRIVATE_KEY, RPC_URL, OPENAI_API_KEY);
 const { client } = registerHelioraPlugin(kit, {
@@ -28,7 +28,7 @@ const { client } = registerHelioraPlugin(kit, {
 
 ## Direct REST client
 ```ts
-import { HelioraClient } from "@solanaspredict/agent-kit-plugin";
+import { HelioraClient } from "@heliora/agent-kit-plugin";
 const c = new HelioraClient({ walletAddress: "8xAB...sol" });
 const { markets } = await c.listMarkets({ category: "Crypto", sort: "volume", take: 10 });
 ```

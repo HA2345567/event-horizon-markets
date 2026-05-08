@@ -18,10 +18,8 @@ export class SolanaService {
     const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
     this.connection = new Connection(rpcUrl, 'confirmed');
 
-    // Load agent keypair or fallback
     const keypairPath = path.resolve(process.cwd(), process.env.AGENT_KEYPAIR_PATH || './scripts/agent-keypair.json');
     if (!fs.existsSync(keypairPath)) {
-      console.warn(`[SolanaService] Agent keypair not found at ${keypairPath}. Using ephemeral keypair for dev.`);
       this.agentKeypair = Keypair.generate();
     } else {
       const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(keypairPath, 'utf-8')));
@@ -29,174 +27,117 @@ export class SolanaService {
     }
 
     this.programId = new PublicKey(process.env.PROGRAM_ID || 'By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT');
-
-    // Initialize Anchor Provider
     const wallet = new anchor.Wallet(this.agentKeypair);
-    const provider = new anchor.AnchorProvider(this.connection, wallet, {
-      preflightCommitment: 'confirmed',
-    });
-
+    const provider = new anchor.AnchorProvider(this.connection, wallet, { preflightCommitment: 'confirmed' });
     this.program = new anchor.Program(IDL, provider);
   }
 
-  async getAgentBalance() {
-    const balance = await this.connection.getBalance(this.agentKeypair.publicKey);
-    return balance / anchor.web3.LAMPORTS_PER_SOL;
-  }
-
-  async verifyTransaction(txSig: string): Promise<boolean> {
-    try {
-      const tx = await this.connection.getTransaction(txSig, {
-        commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0,
-      });
-      if (!tx) throw new Error('Transaction not found');
-      if (tx.meta?.err) throw new Error('Transaction failed on-chain');
-      return true;
-    } catch (error) {
-      console.error(`[SolanaService] Verification failed for ${txSig}:`, error);
-      return false;
-    }
-  }
-
-  async mintMockUsdc(targetWallet: string, amount: number) {
-    // In a real devnet environment with spl-token, this would use mintTo
-    // For now, we will simulate it, or assume the agent wallet transfers it
-    // Actually using spl-token transfer:
-    try {
-      const { getOrCreateAssociatedTokenAccount, transfer } = await import('@solana/spl-token');
-      const targetPubkey = new PublicKey(targetWallet);
-      const collateralMint = new PublicKey("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
-
-      const agentAta = await getOrCreateAssociatedTokenAccount(
-        this.connection,
-        this.agentKeypair,
-        collateralMint,
-        this.agentKeypair.publicKey
-      );
-
-      const userAta = await getOrCreateAssociatedTokenAccount(
-        this.connection,
-        this.agentKeypair,
-        collateralMint,
-        targetPubkey
-      );
-
-      const txSig = await transfer(
-        this.connection,
-        this.agentKeypair,
-        agentAta.address,
-        userAta.address,
-        this.agentKeypair,
-        amount * 1_000_000 // 6 decimals
-      );
-
-      console.log(`✅ Airdropped ${amount} USDC to ${targetWallet}. TX: ${txSig}`);
-      return txSig;
-    } catch (err: any) {
-      console.error('❌ Failed to airdrop mock USDC:', err.message);
-      // Fallback for dev mode without real tokens: just return success
-      return `simulated_tx_${Date.now()}`;
-    }
-  }
-
   private getMarketIdNum(uuid: string): number {
-    // Deterministically generate a u32 from the market UUID
-    const hash = Buffer.from(uuid.replace(/-/g, ''), 'hex');
-    return hash.readUInt32LE(0);
+    if (!uuid || typeof uuid !== 'string') return Math.floor(Math.random() * 0xFFFFFFFF);
+    try {
+      const hash = Buffer.from(uuid.replace(/-/g, ''), 'hex');
+      return hash.readUInt32LE(0);
+    } catch (e) {
+      return Math.floor(Math.random() * 0xFFFFFFFF);
+    }
   }
 
-  async createMarketOnChain(marketData: { id: string; endsAt: Date }) {
+  async createMarketOnChain(marketData: { 
+    id: string; 
+    question: string;
+    endsAt: Date;
+    outcomesCount?: number;
+    resolutionSource?: string;
+    strikePrice?: number;
+    pythFeed?: string;
+  }) {
     try {
-      console.log(`[SolanaService] Creating market on-chain: ${marketData.id}`);
-
+      const outcomesCount = marketData.outcomesCount || 2;
+      const resSource = marketData.resolutionSource || 'authority';
+      const resolutionSource = { [resSource.charAt(0).toUpperCase() + resSource.slice(1)]: {} };
+      
       const marketIdNum = this.getMarketIdNum(marketData.id);
       const marketIdBytes = Buffer.alloc(4);
       marketIdBytes.writeUInt32LE(marketIdNum, 0);
 
-      const [marketPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('market'), marketIdBytes],
-        this.programId
-      );
-      const [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), marketIdBytes],
-        this.programId
-      );
-      const [outcomeAMintPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('outcome_a'), marketIdBytes],
-        this.programId
-      );
-      const [outcomeBMintPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('outcome_b'), marketIdBytes],
-        this.programId
-      );
+      const [marketPda] = PublicKey.findProgramAddressSync([Buffer.from('market'), marketIdBytes], this.programId);
+      const [vaultPda] = PublicKey.findProgramAddressSync([Buffer.from('vault'), marketIdBytes], this.programId);
 
-      // Devnet USDC placeholder (or any token)
-      const collateralMint = new PublicKey("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
+      const outcomeMints = [];
+      for (let i = 0; i < outcomesCount; i++) {
+        const [mintPda] = PublicKey.findProgramAddressSync([Buffer.from(`outcome_${i}`), marketIdBytes], this.programId);
+        outcomeMints.push({ pubkey: mintPda, isSigner: false, isWritable: true });
+      }
 
+      const collateralMint = new PublicKey(process.env.COLLATERAL_MINT || "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
       const deadline = new anchor.BN(Math.floor(marketData.endsAt.getTime() / 1000));
+      const strikePrice = new anchor.BN(marketData.strikePrice || 0);
+      const pythFeed = new PublicKey(marketData.pythFeed || "11111111111111111111111111111111");
 
       const tx = await this.program.methods
-        .initializeMarket(marketIdNum, deadline)
+        .initializeMarket(
+            marketIdNum, 
+            marketData.question, 
+            resolutionSource, 
+            deadline, 
+            outcomesCount,
+            strikePrice,
+            pythFeed
+        )
         .accounts({
           market: marketPda,
           authority: this.agentKeypair.publicKey,
-          collateralMint: collateralMint,
+          collateralMint,
           collateralVault: vaultPda,
-          outcomeAMint: outcomeAMintPda,
-          outcomeBMint: outcomeBMintPda,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
         })
+        .remainingAccounts(outcomeMints)
         .rpc();
 
-      console.log(`✅ Market created on-chain. TX: ${tx}`);
       return { tx, marketPda: marketPda.toBase58() };
     } catch (error: any) {
       console.error(`❌ Failed to create market on-chain:`, error.message);
-      // Don't throw to prevent crashing the agent runner if solana devnet is down
     }
   }
 
-  async resolveMarketOnChain(marketId: string, outcome: 'YES' | 'NO' | 'INVALID') {
+  async resolveViaPyth(marketId: string, pythFeed: string) {
     try {
-      console.log(`[SolanaService] Resolving market on-chain: ${marketId} -> ${outcome}`);
       const marketIdNum = this.getMarketIdNum(marketId);
       const marketIdBytes = Buffer.alloc(4);
       marketIdBytes.writeUInt32LE(marketIdNum, 0);
-
-      const [marketPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('market'), marketIdBytes],
-        this.programId
-      );
-      const [outcomeAMintPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('outcome_a'), marketIdBytes],
-        this.programId
-      );
-      const [outcomeBMintPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('outcome_b'), marketIdBytes],
-        this.programId
-      );
-
-      // OutcomeA = YES, OutcomeB = NO, Neither = INVALID
-      let winnerEnum: any = { outcomeA: {} }; // For Anchor enum
-      if (outcome === 'YES') winnerEnum = { outcomeA: {} };
-      else if (outcome === 'NO') winnerEnum = { outcomeB: {} };
-      else winnerEnum = { neither: {} };
+      const [marketPda] = PublicKey.findProgramAddressSync([Buffer.from('market'), marketIdBytes], this.programId);
 
       const tx = await this.program.methods
-        .setWinningSide(marketIdNum, winnerEnum)
+        .resolveViaPyth(marketIdNum)
+        .accounts({
+          market: marketPda,
+          pythPriceFeed: new PublicKey(pythFeed),
+          signer: this.agentKeypair.publicKey,
+        })
+        .rpc();
+      return tx;
+    } catch (error: any) {
+      console.error(`❌ Failed to resolve via Pyth:`, error.message);
+    }
+  }
+
+  async resolveMarketOnChain(marketId: string, winningIndex: number) {
+    try {
+      const marketIdNum = this.getMarketIdNum(marketId);
+      const marketIdBytes = Buffer.alloc(4);
+      marketIdBytes.writeUInt32LE(marketIdNum, 0);
+      const [marketPda] = PublicKey.findProgramAddressSync([Buffer.from('market'), marketIdBytes], this.programId);
+
+      const tx = await this.program.methods
+        .setWinner(marketIdNum, winningIndex)
         .accounts({
           authority: this.agentKeypair.publicKey,
           market: marketPda,
-          outcomeAMint: outcomeAMintPda,
-          outcomeBMint: outcomeBMintPda,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
         .rpc();
-
-      console.log(`✅ Market resolved on-chain. TX: ${tx}`);
       return tx;
     } catch (error: any) {
       console.error(`❌ Failed to resolve market on-chain:`, error.message);

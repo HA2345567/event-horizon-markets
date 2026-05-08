@@ -1,7 +1,10 @@
 export const IDL: any = {
-  version: "0.7.0",
+  version: "0.5.0",
   name: "heliora_prediction_market",
   address: "By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT",
+  metadata: {
+    address: "By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT"
+  },
   instructions: [
     {
       name: "initializeGlobalConfig",
@@ -31,30 +34,7 @@ export const IDL: any = {
         { name: "settlementDeadline", type: "i64" },
         { name: "outcomesCount", type: "u8" },
         { name: "strikePrice", type: "i64" },
-        { name: "pythFeed", type: "pubkey" },
-      ],
-    },
-    {
-      name: "stakeOracle",
-      accounts: [
-        { name: "registry", isMut: true, isSigner: false },
-        { name: "oracle", isMut: true, isSigner: true },
-        { name: "systemProgram", isMut: false, isSigner: false },
-      ],
-      args: [
-        { name: "amount", type: "u64" },
-      ],
-    },
-    {
-      name: "disputeMarket",
-      accounts: [
-        { name: "market", isMut: true, isSigner: false },
-        { name: "dispute", isMut: true, isSigner: false },
-        { name: "challenger", isMut: true, isSigner: true },
-        { name: "systemProgram", isMut: false, isSigner: false },
-      ],
-      args: [
-        { name: "marketId", type: "u32" },
+        { name: "pythFeed", type: "publicKey" },
       ],
     },
     {
@@ -130,6 +110,20 @@ export const IDL: any = {
       ],
     },
     {
+      name: "splitTokens",
+      accounts: [
+        { name: "market", isMut: true, isSigner: false },
+        { name: "user", isMut: true, isSigner: true },
+        { name: "userCollateral", isMut: true, isSigner: false },
+        { name: "collateralVault", isMut: true, isSigner: false },
+        { name: "tokenProgram", isMut: false, isSigner: false },
+      ],
+      args: [
+        { name: "marketId", type: "u32" },
+        { name: "amount", type: "u64" },
+      ],
+    },
+    {
       name: "setWinner",
       accounts: [
         { name: "authority", isMut: true, isSigner: true },
@@ -158,96 +152,67 @@ export const IDL: any = {
     }
   ],
   accounts: [
-    { name: "market", discriminator: [219, 190, 213, 55, 0, 227, 198, 154] },
-    { name: "oracleRegistry", discriminator: [94, 153, 19, 250, 94, 0, 12, 172] },
-    { name: "agentTemplate", discriminator: [144, 215, 86, 173, 92, 116, 55, 22] },
-    { name: "agentAccount", discriminator: [241, 119, 69, 140, 233, 9, 112, 50] }
-  ],
-  types: [
     {
-      name: "market",
+      name: "Market",
       type: {
         kind: "struct",
         fields: [
-          { name: "authority", type: "pubkey" },
+          { name: "authority", type: "publicKey" },
           { name: "marketId", type: "u32" },
           { name: "createdAt", type: "i64" },
           { name: "settlementDeadline", type: "i64" },
           { name: "question", type: "string" },
           { name: "resolutionCriteria", type: "string" },
           { name: "resolutionSource", type: { defined: { name: "ResolutionSource" } } },
-          { name: "collateralMint", type: "pubkey" },
-          { name: "collateralVault", type: "pubkey" },
+          { name: "collateralMint", type: "publicKey" },
+          { name: "collateralVault", type: "publicKey" },
           { name: "outcomesCount", type: "u8" },
-          { name: "outcomeMints", type: { array: ["pubkey", 8] } },
+          { name: "outcomeMints", type: { array: ["publicKey", 8] } },
           { name: "isSettled", type: "bool" },
           { name: "winningOutcomeIndex", type: { option: "u8" } },
           { name: "totalCollateralLocked", type: "u64" },
           { name: "poolInitialized", type: "bool" },
-          { name: "lpMint", type: "pubkey" },
-          { name: "outcomeVaults", type: { array: ["pubkey", 8] } },
+          { name: "lpMint", type: "publicKey" },
+          { name: "outcomeVaults", type: { array: ["publicKey", 8] } },
           { name: "resolutionVotesCount", type: "u8" },
           { name: "consensusThreshold", type: "u8" },
           { name: "totalConsensusConfidence", type: "u32" },
           { name: "strikePrice", type: "i64" },
-          { name: "pythFeed", type: "pubkey" },
-          { name: "assignedOracles", type: { array: ["pubkey", 5] } },
-          { name: "isDisputed", type: "bool" },
-          { name: "disputeDeadline", type: "i64" },
+          { name: "pythFeed", type: "publicKey" },
           { name: "bump", type: "u8" }
         ]
       }
     },
     {
-      name: "oracleRegistry",
+      name: "OracleVote",
       type: {
         kind: "struct",
         fields: [
-          { name: "oracle", type: "pubkey" },
-          { name: "stakedAmount", type: "u64" },
-          { name: "accuracyRate", type: "u8" },
-          { name: "totalResolved", type: "u32" },
-          { name: "isActive", type: "bool" },
+          { name: "market", type: "publicKey" },
+          { name: "oracle", type: "publicKey" },
+          { name: "outcomeIndex", type: "u8" },
+          { name: "confidence", type: "u8" },
+          { name: "timestamp", type: "i64" },
           { name: "bump", type: "u8" }
         ]
       }
     },
     {
-      name: "agentTemplate",
+      name: "GlobalConfig",
       type: {
         kind: "struct",
         fields: [
-          { name: "creator", type: "pubkey" },
-          { name: "name", type: "string" },
-          { name: "agentType", type: "u8" },
-          { name: "performanceFeeBps", type: "u16" },
-          { name: "totalStaked", type: "u64" },
-          { name: "totalPnl", type: "i64" },
-          { name: "sharpeRatio", type: "i32" },
-          { name: "maxDrawdownBps", type: "u16" },
-          { name: "accuracyRate", type: "u8" },
+          { name: "authority", type: "publicKey" },
+          { name: "treasury", type: "publicKey" },
+          { name: "protocolFeeBps", type: "u16" },
+          { name: "creatorFeeBps", type: "u16" },
+          { name: "lpFeeBps", type: "u16" },
           { name: "bump", type: "u8" }
         ]
       }
-    },
-    {
-      name: "agentAccount",
-      type: {
-        kind: "struct",
-        fields: [
-          { name: "owner", type: "pubkey" },
-          { name: "agentTemplate", type: "pubkey" },
-          { name: "agentKey", type: "pubkey" },
-          { name: "collateralVault", type: "pubkey" },
-          { name: "maxBetAmount", type: "u64" },
-          { name: "dailyLossLimit", type: "u64" },
-          { name: "currentDailyLoss", type: "u64" },
-          { name: "lastTradeTimestamp", type: "i64" },
-          { name: "isActive", type: "bool" },
-          { name: "bump", type: "u8" }
-        ]
-      }
-    },
+    }
+  ],
+  types: [
     {
       name: "ResolutionSource",
       type: {

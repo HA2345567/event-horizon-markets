@@ -188,62 +188,62 @@ function KalshiCard({ m }: { m: KalshiMarketLive }) {
           </div>
         </div>
 
-      {/* Title */}
+        {/* Title */}
       <h3 className="text-[17px] font-bold text-white leading-snug mb-8 line-clamp-2 min-h-[3rem]">
-        {m.title}
-      </h3>
+          {m.title}
+        </h3>
 
-      {/* Outcomes Grid */}
+        {/* Outcomes Grid */}
       <div className="flex flex-col gap-6 mb-8">
-        {/* Yes Row */}
+          {/* Yes Row */}
         <div className="flex items-center justify-between group/row">
           <div className="flex flex-col gap-1 flex-1 mr-8">
             <span className="text-base font-semibold text-white/95">Yes</span>
             <div className="h-[3px] w-full bg-[#1A1A1A] rounded-full overflow-hidden">
-              <div 
+                <div 
                 className="h-full bg-[#00FFBD] transition-all duration-1000 ease-out shadow-[0_0_8px_rgba(0,255,189,0.2)]" 
-                style={{ width: `${yesProb}%` }}
-              />
+                  style={{ width: `${yesProb}%` }}
+                />
+              </div>
             </div>
-          </div>
           <div className="flex items-center gap-5">
             <span className="text-[13px] font-medium text-[#555555]">{yesMultiplier}x</span>
             <div className="min-w-[68px] h-[36px] rounded-full border border-[#00FFBD]/30 flex items-center justify-center bg-[#00FFBD]/5">
               <span className="text-[14px] font-bold text-white">{yesProb}%</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* No Row */}
+          {/* No Row */}
         <div className="flex items-center justify-between group/row">
           <div className="flex flex-col gap-1 flex-1 mr-8">
             <span className="text-base font-semibold text-white/95">No</span>
             <div className="h-[3px] w-full bg-[#1A1A1A] rounded-full overflow-hidden">
-              <div 
+                <div 
                 className="h-full bg-[#FF4F4F] transition-all duration-1000 ease-out" 
-                style={{ width: `${noProb}%` }}
-              />
+                  style={{ width: `${noProb}%` }}
+                />
+              </div>
             </div>
-          </div>
           <div className="flex items-center gap-5">
             <span className="text-[13px] font-medium text-[#555555]">{noMultiplier}x</span>
             <div className="min-w-[68px] h-[36px] rounded-full border border-white/10 flex items-center justify-center bg-white/5">
               <span className="text-[14px] font-bold text-white">{noProb}%</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Footer */}
+        {/* Footer */}
       <div className="flex items-center justify-between mt-auto pt-2">
         <span className="text-[12px] font-medium text-[#555555]">
-          {fmtUsd(vol)} vol
-        </span>
+            {fmtUsd(vol)} vol
+          </span>
         <div className="flex items-center gap-1.5 text-[12px] font-medium text-[#555555]">
           <Radio className="h-3 w-3 text-success/70" />
-          {timeUntil(m.close_time)}
+            {timeUntil(m.close_time)}
+          </div>
         </div>
-      </div>
       </div>
     </Link>
   );

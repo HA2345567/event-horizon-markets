@@ -26,7 +26,7 @@ export function useMarketSocket(marketId: string | undefined) {
     if (!marketId) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname === 'localhost' ? 'localhost:3000' : window.location.host;
+    const host = window.location.host; // Use the actual host and port from the window (e.g., localhost:8080)
     const url = `${protocol}//${host}/ws/${marketId}`;
 
     console.log(`Connecting to WebSocket: ${url}`);

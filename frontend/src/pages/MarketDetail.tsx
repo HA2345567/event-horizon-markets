@@ -158,7 +158,7 @@ export default function MarketDetail() {
   const [isBuying, setIsBuying] = useState(false);
   const [isSell, setIsSell] = useState(false);
 
-  const handleTrade = async () => {
+  const handleTrade = async (targetIndex: number) => {
     if (!publicKey || !signTransaction) {
       toast.error("Please connect your wallet first");
       return;
@@ -166,183 +166,108 @@ export default function MarketDetail() {
 
     try {
       setIsBuying(true);
-      toast.loading("Preparing transaction...", { id: "trade" });
+      toast.loading(`Buying ${market.question.slice(0, 20)}...`, { id: "trade" });
 
       const programId = new PublicKey("By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT");
-
-      // We use a mock anchor provider to build the ix
-      const provider = new anchor.AnchorProvider(
-        connection,
-        {
-          publicKey: publicKey,
-          signTransaction: signTransaction as any,
-          signAllTransactions: async (txs) => txs,
-        },
-        { preflightCommitment: "confirmed" }
-      );
+      const provider = new anchor.AnchorProvider(connection, {
+        publicKey, signTransaction: signTransaction as any, signAllTransactions: async (t) => t
+      }, { preflightCommitment: "confirmed" });
 
       const program = new anchor.Program(IDL, provider);
-
-      // Derive PDAs - Using pure Uint8Array to avoid Buffer polyfill issues in browser
-      const idStr = id || "";
-      const cleanId = idStr.replace(/-/g, '');
-
-      let marketIdNum = 0;
-      if (cleanId.length >= 8) {
-        // Parse the first 8 hex chars (4 bytes) as a u32
-        marketIdNum = parseInt(cleanId.slice(0, 8), 16);
-      } else {
-        // Fallback for short/non-hex IDs
-        for (let i = 0; i < idStr.length; i++) {
-          marketIdNum = ((marketIdNum << 5) - marketIdNum) + idStr.charCodeAt(i);
-          marketIdNum |= 0;
-        }
-        marketIdNum = Math.abs(marketIdNum);
-      }
-
+      const marketIdNum = market.onchainId ? parseInt(market.onchainId) : 0;
       const marketIdBytes = new Uint8Array(4);
-      const view = new DataView(marketIdBytes.buffer);
-      view.setUint32(0, marketIdNum, true);
+      new DataView(marketIdBytes.buffer).setUint32(0, marketIdNum, true);
 
       const encoder = new TextEncoder();
       const [marketPda] = PublicKey.findProgramAddressSync([encoder.encode('market'), marketIdBytes], programId);
       const [vaultPda] = PublicKey.findProgramAddressSync([encoder.encode('vault'), marketIdBytes], programId);
-      const [outcomeAMintPda] = PublicKey.findProgramAddressSync([encoder.encode('outcome_a'), marketIdBytes], programId);
-      const [outcomeBMintPda] = PublicKey.findProgramAddressSync([encoder.encode('outcome_b'), marketIdBytes], programId);
-
-      // For Devnet testing, we use a placeholder USDC
+      
       const collateralMint = new PublicKey("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
-
       const userCollateral = getAssociatedTokenAddressSync(collateralMint, publicKey);
-      const userOutcomeA = getAssociatedTokenAddressSync(outcomeAMintPda, publicKey);
-      const userOutcomeB = getAssociatedTokenAddressSync(outcomeBMintPda, publicKey);
+      
+      const targetMint = new PublicKey(market.outcome_mints[targetIndex]);
+      const userOutcome = getAssociatedTokenAddressSync(targetMint, publicKey);
+      const [outcomeVault] = PublicKey.findProgramAddressSync([encoder.encode(`outcome_${targetIndex}`), marketIdBytes], programId);
 
-      const amountToBuy = new anchor.BN(amount * 1_000_000); // Assuming 6 decimals for mock USDC
+      const amountIn = new anchor.BN(amount * 1_000_000);
+
+      // Remaining accounts for categorical swap
+      const remainingAccounts = [];
+      for (let i = 0; i < market.outcomes_count; i++) {
+        remainingAccounts.push({ pubkey: new PublicKey(market.outcome_mints[i]), isSigner: false, isWritable: true });
+      }
+      for (let i = 0; i < market.outcomes_count; i++) {
+        const [v] = PublicKey.findProgramAddressSync([encoder.encode(`outcome_${i}`), marketIdBytes], programId);
+        remainingAccounts.push({ pubkey: v, isSigner: false, isWritable: true });
+      }
 
       const tx = await program.methods
-        .splitTokens(marketIdNum, amountToBuy)
+        .swap(marketIdNum, targetIndex, amountIn)
         .accounts({
           market: marketPda,
           user: publicKey,
-          userCollateral: userCollateral,
+          userCollateral,
           collateralVault: vaultPda,
-          outcomeAMint: outcomeAMintPda,
-          outcomeBMint: outcomeBMintPda,
-          userOutcomeA: userOutcomeA,
-          userOutcomeB: userOutcomeB,
+          userOutcome,
+          outcomeVault,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
-        .transaction();
+        .remainingAccounts(remainingAccounts)
+        .rpc();
 
-      toast.loading("Awaiting wallet approval...", { id: "trade" });
-
-      const signature = await sendTransaction(tx, connection);
-
-      toast.loading("Confirming on-chain...", { id: "trade" });
-      await connection.confirmTransaction(signature, "confirmed");
-
-      // Now tell backend it succeeded so DB updates
-      await api.placeTrade({
-        marketId: id!,
-        side: side,
-        kind: orderType === "Market" ? "market" : "limit",
-        shares: shares,
-        isSell: isSell,
-        txSig: signature
-      });
-
-      toast.success(`Successfully ${isSell ? 'sold' : 'bought'} $${amount} of ${side}!`, { id: "trade" });
+      toast.success("Trade confirmed on-chain!", { id: "trade" });
       queryClient.invalidateQueries({ queryKey: ["market", id] });
-      queryClient.invalidateQueries({ queryKey: ["portfolio"] });
     } catch (err: any) {
-      console.error(err);
-      toast.error(`Trade failed: ${err.message || "Unknown error"}`, { id: "trade" });
+      toast.error(`Trade failed: ${err.message}`, { id: "trade" });
     } finally {
       setIsBuying(false);
     }
   };
 
-  const [isClaiming, setIsClaiming] = useState(false);
-
   const handleClaim = async () => {
-    if (!publicKey || !signTransaction) {
-      toast.error("Please connect your wallet first");
-      return;
-    }
-
+    if (!publicKey || !signTransaction) return;
     try {
       setIsClaiming(true);
-      toast.loading("Preparing claim...", { id: "claim" });
-
+      toast.loading("Claiming rewards...", { id: "claim" });
+      
       const programId = new PublicKey("By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT");
-      const provider = new anchor.AnchorProvider(
-        connection,
-        {
-          publicKey: publicKey,
-          signTransaction: signTransaction as any,
-          signAllTransactions: async (txs) => txs,
-        },
-        { preflightCommitment: "confirmed" }
-      );
+      const provider = new anchor.AnchorProvider(connection, {
+        publicKey, signTransaction: signTransaction as any, signAllTransactions: async (t) => t
+      }, { preflightCommitment: "confirmed" });
+
       const program = new anchor.Program(IDL, provider);
-
-      const idStr = id || "";
-      const cleanId = idStr.replace(/-/g, '');
-      let marketIdNum = 0;
-      if (cleanId.length >= 8) marketIdNum = parseInt(cleanId.slice(0, 8), 16);
-      else {
-        for (let i = 0; i < idStr.length; i++) {
-          marketIdNum = ((marketIdNum << 5) - marketIdNum) + idStr.charCodeAt(i);
-          marketIdNum |= 0;
-        }
-        marketIdNum = Math.abs(marketIdNum);
-      }
-
+      const marketIdNum = market.onchainId ? parseInt(market.onchainId) : 0;
       const marketIdBytes = new Uint8Array(4);
-      const view = new DataView(marketIdBytes.buffer);
-      view.setUint32(0, marketIdNum, true);
-
+      new DataView(marketIdBytes.buffer).setUint32(0, marketIdNum, true);
+      
       const encoder = new TextEncoder();
       const [marketPda] = PublicKey.findProgramAddressSync([encoder.encode('market'), marketIdBytes], programId);
       const [vaultPda] = PublicKey.findProgramAddressSync([encoder.encode('vault'), marketIdBytes], programId);
-      const [outcomeAMintPda] = PublicKey.findProgramAddressSync([encoder.encode('outcome_a'), marketIdBytes], programId);
-      const [outcomeBMintPda] = PublicKey.findProgramAddressSync([encoder.encode('outcome_b'), marketIdBytes], programId);
 
+      const winningIndex = market.winning_outcome_index ?? 0;
+      const winningMint = new PublicKey(market.outcome_mints[winningIndex]);
+      const userWinningOutcomeAta = getAssociatedTokenAddressSync(winningMint, publicKey);
+      
       const collateralMint = new PublicKey("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
       const userCollateral = getAssociatedTokenAddressSync(collateralMint, publicKey);
-      const userOutcomeA = getAssociatedTokenAddressSync(outcomeAMintPda, publicKey);
-      const userOutcomeB = getAssociatedTokenAddressSync(outcomeBMintPda, publicKey);
 
       const tx = await program.methods
         .claimRewards(marketIdNum)
         .accounts({
-          market: marketPda,
           user: publicKey,
-          userCollateral: userCollateral,
+          market: marketPda,
+          userCollateral,
           collateralVault: vaultPda,
-          outcomeAMint: outcomeAMintPda,
-          outcomeBMint: outcomeBMintPda,
-          userOutcomeA: userOutcomeA,
-          userOutcomeB: userOutcomeB,
+          winningOutcomeMint: winningMint,
+          userWinningOutcomeAta,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
-        .transaction();
+        .rpc();
 
-      toast.loading("Awaiting approval...", { id: "claim" });
-      const signature = await sendTransaction(tx, connection);
-
-      toast.loading("Finalizing redemption...", { id: "claim" });
-      await connection.confirmTransaction(signature, "confirmed");
-
-      // Notify backend
-      await api.redeemMarket(id!, signature);
-
-      toast.success("Winnings claimed successfully!", { id: "claim" });
+      toast.success("Rewards claimed!", { id: "claim" });
       queryClient.invalidateQueries({ queryKey: ["market", id] });
-      queryClient.invalidateQueries({ queryKey: ["portfolio"] });
     } catch (err: any) {
-      console.error(err);
-      toast.error(`Claim failed: ${err.message || "Unknown error"}`, { id: "claim" });
+      toast.error(`Claim failed: ${err.message}`, { id: "claim" });
     } finally {
       setIsClaiming(false);
     }

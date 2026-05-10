@@ -13,7 +13,7 @@
  * └─────────────────────────────────────────────────────┘
  */
 
-import { prisma } from '../index';
+import { prisma } from '../prisma';
 import { newId, generatePriceHistory } from './helpers';
 import { callGemini, geminiAvailable } from './gemini';
 import { solanaService } from './solana-service';
@@ -38,115 +38,162 @@ async function fetchKalshiOpen(limit = 30): Promise<any[]> {
 
 function mapCategory(raw: string): string {
   const c = (raw || '').toLowerCase();
-  if (c.includes('crypto') || c.includes('bitcoin') || c.includes('eth')) return 'Crypto';
-  if (c.includes('politic') || c.includes('election') || c.includes('fed')) return 'Politics';
-  if (c.includes('sport') || c.includes('nfl') || c.includes('nba')) return 'Sports';
-  if (c.includes('ai') || c.includes('tech') || c.includes('openai')) return 'AI';
-  return 'AI';
+  if (c.includes('crypto') || c.includes('bitcoin') || c.includes('eth') || c.includes('solana')) return 'Crypto';
+  if (c.includes('politic') || c.includes('election') || c.includes('president') || c.includes('senate') || c.includes('modi')) return 'Politics';
+  if (c.includes('sport') || c.includes('nfl') || c.includes('nba') || c.includes('soccer') || c.includes('cricket') || c.includes('ipl') || c.includes('t20')) return 'Sports';
+  if (c.includes('ai') || c.includes('tech') || c.includes('openai') || c.includes('nvidia') || c.includes('llm') || c.includes('anthropic')) return 'AI';
+  if (c.includes('economy') || c.includes('fed') || c.includes('rate') || c.includes('inflation') || c.includes('defi') || c.includes('yield')) return 'DeFi';
+  if (c.includes('meme') || c.includes('doge') || c.includes('pepe') || c.includes('shib')) return 'Memes';
+  if (c.includes('nft') || c.includes('bored ape') || c.includes('punk')) return 'NFTs';
+  if (c.includes('culture') || c.includes('movie') || c.includes('oscar') || c.includes('grammy') || c.includes('social') || c.includes('twitter') || c.includes('x.com')) return 'Social';
+  return 'Crypto';
+}
+
+async function fetchPolymarketTrending(limit = 30): Promise<any[]> {
+  try {
+    const r = await fetch(`https://gamma-api.polymarket.com/events?active=true&closed=false&order=volume24hr&limit=${limit}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!r.ok) return [];
+    return await r.json() as any[];
+  } catch {
+    return [];
+  }
 }
 
 export async function runMarketCreatorAgent(): Promise<void> {
-  console.log('[CreatorAgent] Polling Kalshi for new markets to mirror...');
+  console.log('[CreatorAgent] Starting deep-dive sync (Kalshi + Polymarket)...');
 
-  const kalshiMarkets = await fetchKalshiOpen(20);
-  if (kalshiMarkets.length === 0) {
-    console.log('[CreatorAgent] No Kalshi markets available, skipping.');
-    return;
-  }
+  const kalshiMarkets = await fetchKalshiOpen(200);
+  const polyEvents = await fetchPolymarketTrending(100);
 
-  for (const km of kalshiMarkets.slice(0, 15)) {
-    const ticker: string = km.ticker ?? km.market_id ?? '';
-    const question: string = km.title ?? '';
-    const closeTime: string = km.close_time ?? km.expiration_time ?? '';
+  const combined: any[] = [];
 
-    if (!ticker || !question || !closeTime) continue;
-    const endsAt = new Date(closeTime);
+  // Map Kalshi
+  kalshiMarkets.forEach(km => {
+    combined.push({
+      question: km.title ?? '',
+      ticker: km.ticker ?? km.market_id ?? '',
+      subtitle: km.subtitle ?? '',
+      closeTime: km.close_time ?? km.expiration_time ?? '',
+      volume: km.volume ?? 0,
+      category: km.category ?? '',
+      source: 'kalshi',
+      original: km
+    });
+  });
+
+  // Map Polymarket
+  polyEvents.forEach(pe => {
+    (pe.markets ?? []).forEach((pm: any) => {
+      combined.push({
+        question: pm.question || pe.title || '',
+        ticker: pm.conditionId || pm.id || '',
+        subtitle: pe.description || '',
+        closeTime: pm.endDate || pe.endDate || '',
+        volume: parseFloat(pm.volume || pe.volume24hr || '0'),
+        category: pe.category || pm.groupItemTitle || 'General',
+        source: 'polymarket',
+        original: pm
+      });
+    });
+  });
+
+  const filtered = combined.filter(m => {
+    const q = m.question.toLowerCase();
+    const isJunk = m.question.includes(':') || 
+                   m.question.includes(',') || 
+                   q.startsWith('yes ') ||
+                   q.includes('over ') || q.includes('under ') || 
+                   q.includes('points scored') || q.includes('goals scored') ||
+                   q.includes('pointers') || q.includes('rebounds') ||
+                   q.includes('total points') || q.includes('points in') ||
+                   q.includes('yardage') || q.includes('touchdown') ||
+                   q.includes('winner of') || q.includes('scored by');
+    return !isJunk;
+  });
+
+  // Sort by volume
+  const sorted = filtered.sort((a, b) => b.volume - a.volume);
+
+  for (const m of sorted.slice(0, 150)) {
+    if (!m.ticker || !m.question || !m.closeTime) continue;
+    const endsAt = new Date(m.closeTime);
     if (isNaN(endsAt.getTime()) || endsAt < new Date()) continue;
 
-    // Already exists?
-    const exists = await prisma.market.findFirst({
-      where: { resolutionDetail: `kalshi:${ticker}` },
-    });
+    const exists = await prisma.market.findFirst({ where: { resolutionDetail: `${m.source}:${m.ticker}` } });
     if (exists) continue;
-
-    const yesPrice = Math.max(0.02, Math.min(0.98, ((km.yes_ask ?? 50) + (km.yes_bid ?? 50)) / 2 / 100));
-
-    // Ask Gemini if this market is worth mirroring (one call at a time, throttled)
-    let shouldMirror = true;
-    let odds = yesPrice;
-
-    // RULE: If the market has decent volume (>1k), we strongly prefer mirroring it
-    const volume = km.volume ?? 0;
-    const isInteresting = volume > 1000 || (km.open_interest ?? 0) > 5000;
 
     if (geminiAvailable()) {
       try {
-        const prompt = `You are a prediction market analyst AI agent on Solana.
+        const prompt = `You are a Senior AI Market Analyst for Heliora.
         
-Market to evaluate from Kalshi:
-- Title: "${question}"
-- Current YES probability: ${(yesPrice * 100).toFixed(0)}%
-- Closes: ${endsAt.toDateString()}
-- Category: ${km.category ?? 'Unknown'}
-- Volume: $${volume.toLocaleString()}
+Analyze this trending prediction for institutional mirroring:
+- Title: "${m.question}"
+- Description: "${m.subtitle.slice(0, 150)}"
+- Volume: $${m.volume.toLocaleString()}
+- Source: ${m.source.toUpperCase()}
 
-These markets are from Kalshi, a regulated exchange, so they are generally well-defined and verifiable.
-Decide if this market should be mirrored on-chain. We want high-interest, clear, and engaging markets.
-Respond ONLY with JSON: { "mirror": true|false, "odds": <float 0.01-0.99>, "reason": "<one sentence>" }`;
+CRITERIA: Only "Big Picture" global events. 
+TOPICS: Crypto, Politics, Sports, Memes, NFTs, DeFi, Social, AI.
+MANDATORY: Mirror if it's a high-interest global topic. Reject if it's niche/micro-stat.
 
-        const r = await callGemini(prompt); // throttled
-        const parsed = r.json<{ mirror: boolean; odds: number; reason: string }>();
-        if (parsed) {
-          // Be more aggressive: mirror if Gemini says true OR if it has significant volume/interest
-          // unless Gemini explicitly flags it as "broken" or "offensive"
-          const isFlagged = parsed.reason.toLowerCase().includes('broken') || parsed.reason.toLowerCase().includes('offensive');
-          shouldMirror = parsed.mirror || (isInteresting && !isFlagged);
-          odds = Math.max(0.02, Math.min(0.98, parsed.odds || yesPrice));
-          console.log(`[CreatorAgent] Gemini: mirror=${shouldMirror} (Gemini said ${parsed.mirror}) — ${parsed.reason}`);
+Respond ONLY with JSON: 
+{ 
+  "mirror": true|false, 
+  "odds": <float 0.01-0.99>, 
+  "reason": "<short reasoning>",
+  "category": "Crypto"|"Politics"|"Sports"|"Memes"|"NFTs"|"DeFi"|"Social"|"AI"
+}`;
+
+        const r = await callGemini(prompt); 
+        const parsed = r.json<{ mirror: boolean; odds: number; reason: string; category: string }>();
+        
+        if (parsed && parsed.mirror) {
+          const cat = parsed.category || mapCategory(m.category);
+          const marketId = newId();
+          
+          await prisma.market.create({
+            data: {
+              id: marketId,
+              question: m.question.slice(0, 250),
+              description: `Mirrored from ${m.source.toUpperCase()} (${m.ticker}). ${m.subtitle}`.trim(),
+              category: cat as any,
+              resolution: 'AIOracle',
+              resolutionDetail: `${m.source}:${m.ticker}`,
+              endsAt,
+              yesPrice: parsed.odds || 0.5,
+              noPrice: parseFloat((1 - (parsed.odds || 0.5)).toFixed(4)),
+              liquidity: Math.max(1000, m.volume / 100),
+              volume: m.volume,
+              participants: Math.floor(Math.random() * 50) + 20,
+              isLive: true,
+              creator: JSON.stringify({ wallet: `${m.source}_bridge.sol`, handle: m.source.toUpperCase() }),
+            },
+          });
+
+          // Price points for chart
+          const hist = generatePriceHistory(parsed.odds || 0.5, 48);
+          const now = Date.now();
+          const interval = (7 * 24 * 60 * 60 * 1000) / hist.length; // 7 days spread
+
+          await prisma.pricePoint.createMany({
+            data: hist.map((p, i) => ({
+              id: newId(),
+              marketId,
+              yesPrice: parseFloat(Math.max(0.01, Math.min(0.99, p)).toFixed(4)),
+              noPrice: parseFloat(Math.max(0.01, Math.min(0.99, 1 - p)).toFixed(4)),
+              ts: new Date(now - (hist.length - 1 - i) * interval),
+            })),
+          });
+
+          await solanaService.createMarketOnChain({ id: marketId, endsAt });
+          console.log(`[CreatorAgent] ✅ SUCCESS: Mirrored "${m.question.slice(0, 45)}" from ${m.source.toUpperCase()}`);
         }
       } catch (e) {
-        console.warn('[CreatorAgent] Gemini call failed:', (e as Error).message);
+        console.warn('[CreatorAgent] Gemini error:', (e as Error).message);
       }
     }
-
-    if (!shouldMirror) continue;
-
-    // Create the market
-    const marketId = newId();
-    await prisma.market.create({
-      data: {
-        id: marketId,
-        question: question.slice(0, 250),
-        description: `Mirrored from Kalshi (${ticker}). ${km.subtitle ?? ''}`.trim(),
-        category: mapCategory(km.category ?? ''),
-        resolution: 'AIOracle',
-        resolutionDetail: `kalshi:${ticker}`,
-        endsAt,
-        yesPrice: odds,
-        noPrice: parseFloat((1 - odds).toFixed(4)),
-        liquidity: (km.open_interest ?? 1000) / 100,
-        volume: km.volume ?? 0,
-        participants: Math.floor((km.volume ?? 100) / 10),
-        isLive: true,
-        creator: JSON.stringify({ wallet: 'creator_agent.sol', handle: 'CreatorAgent' }),
-      },
-    });
-
-    // Seed price history
-    const hist = generatePriceHistory(odds, 48);
-    await prisma.pricePoint.createMany({
-      data: hist.map((p) => ({
-        id: newId(),
-        marketId,
-        yesPrice: parseFloat(Math.max(0.01, Math.min(0.99, p)).toFixed(4)),
-        noPrice: parseFloat(Math.max(0.01, Math.min(0.99, 1 - p)).toFixed(4)),
-      })),
-    });
-
-    // Deploy to Solana
-    await solanaService.createMarketOnChain({ id: marketId, endsAt });
-
-    console.log(`[CreatorAgent] ✅ Created market: "${question.slice(0, 60)}"`);
   }
 }
 

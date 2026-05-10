@@ -1,5 +1,5 @@
 import { WebSocket, WebSocketServer } from 'ws';
-import { prisma } from '../index';
+import { prisma } from '../prisma';
 import { newId } from '../utils/helpers';
 
 const MAX_CONNECTIONS_PER_MARKET = 50;

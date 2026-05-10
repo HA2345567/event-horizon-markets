@@ -4,7 +4,7 @@
  * it into the local SQLite database so all agents can trade on live markets.
  */
 
-import { prisma } from '../index';
+import { prisma } from '../prisma';
 import { newId, generatePriceHistory } from './helpers';
 
 const KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2';
@@ -26,13 +26,16 @@ async function fetchKalshiMarkets(limit = 100): Promise<any[]> {
 
 function mapKalshiCategory(category: string): string {
   const c = (category || '').toLowerCase();
-  if (c.includes('crypto') || c.includes('bitcoin') || c.includes('eth') || c.includes('solana') || c.includes('binance')) return 'Crypto';
-  if (c.includes('politic') || c.includes('election') || c.includes('president') || c.includes('senate') || c.includes('modi')) return 'Politics';
+  if (c.includes('crypto') || c.includes('bitcoin') || c.includes('eth') || c.includes('solana')) return 'Crypto';
+  if (c.includes('politic') || c.includes('election') || c.includes('president') || c.includes('senate') || c.includes('modi') || c.includes('house') || c.includes('vote') || c.includes('democrat') || c.includes('republican') || c.includes('independence') || c.includes('government')) return 'Politics';
   if (c.includes('sport') || c.includes('nfl') || c.includes('nba') || c.includes('soccer') || c.includes('cricket') || c.includes('ipl') || c.includes('t20')) return 'Sports';
-  if (c.includes('ai') || c.includes('tech') || c.includes('openai') || c.includes('nvidia')) return 'AI';
-  if (c.includes('economy') || c.includes('fed') || c.includes('rate') || c.includes('inflation')) return 'Economy';
-  if (c.includes('culture') || c.includes('movie') || c.includes('oscar') || c.includes('grammy')) return 'Culture';
-  return 'Other'; // default
+  if (c.includes('ai') || c.includes('tech') || c.includes('openai') || c.includes('nvidia') || c.includes('llm') || c.includes('anthropic') || c.includes('apple') || c.includes('google')) return 'AI';
+  if (c.includes('economy') || c.includes('fed') || c.includes('rate') || c.includes('inflation') || c.includes('defi') || c.includes('yield') || c.includes('usdt') || c.includes('usdc') || c.includes('staking') || c.includes('gdp') || c.includes('jobs')) return 'DeFi'; // Using DeFi for economy/finance
+  if (c.includes('weather') || c.includes('temp') || c.includes('storm') || c.includes('hurricane') || c.includes('climate')) return 'Weather';
+  if (c.includes('meme') || c.includes('doge') || c.includes('pepe') || c.includes('shib')) return 'Memes';
+  if (c.includes('nft') || c.includes('bored ape') || c.includes('punk') || c.includes('floor')) return 'NFTs';
+  if (c.includes('culture') || c.includes('movie') || c.includes('oscar') || c.includes('grammy') || c.includes('social') || c.includes('twitter') || c.includes('x.com') || c.includes('celebrity')) return 'Social';
+  return 'Politics'; 
 }
 
 function getCategoryImage(category: string): string {
@@ -41,25 +44,30 @@ function getCategoryImage(category: string): string {
     'Politics': 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?auto=format&fit=crop&q=80&w=800',
     'Sports': 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?auto=format&fit=crop&q=80&w=800',
     'AI': 'https://images.unsplash.com/photo-1677442136019-21780ecad995?auto=format&fit=crop&q=80&w=800',
-    'Economy': 'https://images.unsplash.com/photo-1611974717537-43a9f0203f1a?auto=format&fit=crop&q=80&w=800',
-    'Culture': 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&q=80&w=800',
-    'Other': 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=800',
+    'DeFi': 'https://images.unsplash.com/photo-1639762681057-408e52192e55?auto=format&fit=crop&q=80&w=800',
+    'Memes': 'https://images.unsplash.com/photo-1620712943543-bcc4628c71d5?auto=format&fit=crop&q=80&w=800',
+    'NFTs': 'https://images.unsplash.com/photo-1620712943543-bcc4628c71d5?auto=format&fit=crop&q=80&w=800',
+    'Social': 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?auto=format&fit=crop&q=80&w=800',
   };
-  return images[category] || images['Other'];
+  return images[category] || images['Crypto'];
+}
+
+export async function clearAllMarkets(): Promise<void> {
+  console.log('[MarketDataService] Clearing all existing markets...');
+  await prisma.pricePoint.deleteMany({});
+  await prisma.trade.deleteMany({});
+  await prisma.comment.deleteMany({});
+  await prisma.market.deleteMany({});
 }
 
 export async function syncKalshiMarkets(): Promise<number> {
-  console.log('[MarketDataService] Syncing live Kalshi markets (High Capacity)...');
-  const raw = await fetchKalshiMarkets(2000);
-  if (raw.length === 0) {
-    console.log('[MarketDataService] No Kalshi markets returned, using fallback.');
-    return 0;
-  }
+  console.log('[MarketDataService] Syncing live Kalshi markets...');
+  const raw = await fetchKalshiMarkets(200);
+  if (raw.length === 0) return 0;
 
   let synced = 0;
   for (const m of raw) {
     try {
-      // Kalshi market fields
       const ticker: string = m.ticker ?? m.market_id ?? '';
       const question: string = m.title ?? m.question ?? ticker;
       const subtitle: string = m.subtitle ?? '';
@@ -79,189 +87,151 @@ export async function syncKalshiMarkets(): Promise<number> {
 
       const category = mapKalshiCategory(m.category ?? m.event_category ?? '');
 
-      // Upsert by ticker stored in resolutionDetail
-      const existing = await prisma.market.findFirst({
-        where: { resolutionDetail: `kalshi:${ticker}` },
+      // FILTER: Skip 'Player Props', micro-stats, or betting-style markets (Big Picture markets only)
+      const qLower = question.toLowerCase();
+      const isJunk = question.includes(':') || 
+                     question.includes(',') || // Multi-outcome betting lists
+                     qLower.startsWith('yes ') || // "yes TeamA, yes TeamB" style
+                     qLower.includes('player prop') || 
+                     qLower.includes('pointers made') || 
+                     qLower.includes('rebounds') || 
+                     qLower.includes('assists') || 
+                     qLower.includes('yards') || 
+                     qLower.includes('touchdown') ||
+                     qLower.includes('over ') || 
+                     qLower.includes('under ') ||
+                     qLower.includes('points scored') ||
+                     qLower.includes('goals scored') ||
+                     qLower.includes('points in') ||
+                     qLower.includes('total points') ||
+                     qLower.includes('winner of') || // Often niche sports
+                     qLower.includes('scored by');
+      
+      if (isJunk) continue;
+
+      const exists = await prisma.market.findFirst({ where: { resolutionDetail: `kalshi:${ticker}` } });
+      if (exists) continue;
+
+      const marketId = newId();
+      await prisma.market.create({
+        data: {
+          id: marketId,
+          question: question.slice(0, 250),
+          description: subtitle || `Live prediction market from Kalshi. Ticker: ${ticker}`,
+          category,
+          resolution: 'AIOracle',
+          resolutionDetail: `kalshi:${ticker}`,
+          endsAt,
+          yesPrice,
+          noPrice: Math.max(0.01, 1 - yesPrice),
+          liquidity: openInterest > 0 ? openInterest / 100 : 1000,
+          volume: volume,
+          participants: Math.floor(volume / 10) + Math.floor(Math.random() * 50),
+          isLive: true,
+          creator: JSON.stringify({ wallet: 'kalshi_bridge.sol', handle: 'Kalshi' }),
+          imageUrl: getCategoryImage(category),
+        },
       });
 
-      if (existing) {
-        // Update price and volume
-        await prisma.market.update({
-          where: { id: existing.id },
-          data: {
-            yesPrice,
-            noPrice: Math.max(0.01, 1 - yesPrice),
-            volume: Math.max(existing.volume, volume),
-            liquidity: openInterest > 0 ? openInterest / 100 : existing.liquidity,
-            isLive: true,
-          },
-        });
-        // Add a new price point
-        await prisma.pricePoint.create({
-          data: {
-            id: newId(),
-            marketId: existing.id,
-            yesPrice,
-            noPrice: Math.max(0.01, 1 - yesPrice),
-          },
-        });
-      } else {
-        // Create new market from Kalshi data
-        const marketId = newId();
-        await prisma.market.create({
-          data: {
-            id: marketId,
-            question: question.slice(0, 250),
-            description: subtitle || `Live prediction market from Kalshi. Ticker: ${ticker}`,
-            category,
-            resolution: 'AIOracle',
-            resolutionDetail: `kalshi:${ticker}`,
-            endsAt,
-            yesPrice,
-            noPrice: Math.max(0.01, 1 - yesPrice),
-            liquidity: openInterest > 0 ? openInterest / 100 : 1000,
-            volume: volume,
-            participants: Math.floor(volume / 10) + Math.floor(Math.random() * 50),
-            isLive: true,
-            creator: JSON.stringify({ wallet: 'kalshi_bridge.sol', handle: 'Kalshi' }),
-            imageUrl: getCategoryImage(category),
-          },
-        });
+      const history = generatePriceHistory(yesPrice, 48);
+      const now = Date.now();
+      const interval = (7 * 24 * 60 * 60 * 1000) / history.length; // 7 days spread
 
-        // Seed price history
-        const history = generatePriceHistory(yesPrice, 48);
-        await prisma.pricePoint.createMany({
-          data: history.map((p) => ({
-            id: newId(),
-            marketId,
-            yesPrice: p,
-            noPrice: Math.max(0.01, 1 - p),
-          })),
-        });
-        synced++;
-      }
-    } catch (e) {
-      // Skip malformed markets silently
-    }
+      await prisma.pricePoint.createMany({
+        data: history.map((p, i) => ({
+          id: newId(),
+          marketId,
+          yesPrice: p,
+          noPrice: Math.max(0.01, 1 - p),
+          ts: new Date(now - (history.length - 1 - i) * interval),
+        })),
+      });
+      synced++;
+    } catch (e) {}
   }
-
-  console.log(`[MarketDataService] Synced ${synced} new markets. Total: ${raw.length} checked.`);
   return synced;
 }
 
-/**
- * Seed fallback markets (used when Kalshi API is unavailable)
- */
 export const FALLBACK_MARKETS = [
   {
-    question: 'Will Mumbai Indians (MI) win the next IPL match?',
-    description: 'Resolves YES if Mumbai Indians win their upcoming match in the 2026 IPL season.',
-    category: 'Sports',
-    yesPrice: 0.52,
-    volume: 1200000,
-    participants: 9500,
-    daysFromNow: 2,
-    imageUrl: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?auto=format&fit=crop&q=80&w=800',
-  },
-  {
-    question: 'Will Royal Challengers Bengaluru (RCB) qualify for the IPL Playoffs?',
-    description: 'Resolves YES if RCB finishes in the top 4 of the league table at the end of the regular season.',
-    category: 'Sports',
-    yesPrice: 0.38,
-    volume: 2400000,
-    participants: 18000,
-    daysFromNow: 15,
-    imageUrl: 'https://images.unsplash.com/photo-1624555130581-1d9cca783bc0?auto=format&fit=crop&q=80&w=800',
-  },
-  {
-    question: 'Will Narendra Modi win a majority in the next General Election?',
-    description: 'Resolves YES if the BJP-led NDA alliance secures more than 272 seats in the Lok Sabha.',
+    question: '2028 Democratic presidential nominee',
+    description: 'Resolves to the official nominee of the Democratic Party for the 2028 US Presidential Election.',
     category: 'Politics',
-    yesPrice: 0.64,
-    volume: 5500000,
-    participants: 45000,
-    daysFromNow: 300,
+    yesPrice: 0.26,
+    volume: 104618102,
+    participants: 45,
+    daysFromNow: 800,
     imageUrl: 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?auto=format&fit=crop&q=80&w=800',
   },
   {
-    question: 'Will Bitcoin (BTC) exceed $100,000 before July 2026?',
-    description: 'Resolves YES if BTC/USD hits $100,000 or higher on any major exchange before the close date.',
+    question: '2028 Republican presidential nominee',
+    description: 'Resolves to the official nominee of the Republican Party for the 2028 US Presidential Election.',
+    category: 'Politics',
+    yesPrice: 0.36,
+    volume: 85200400,
+    participants: 38,
+    daysFromNow: 800,
+    imageUrl: 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?auto=format&fit=crop&q=80&w=800',
+  },
+  {
+    question: 'Los Angeles Mayor winner?',
+    description: 'Resolves to the winner of the upcoming Los Angeles mayoral election.',
+    category: 'Politics',
+    yesPrice: 0.50,
+    volume: 6064543,
+    participants: 10,
+    daysFromNow: 24,
+    imageUrl: 'https://images.unsplash.com/photo-1505542403711-370ad531a78d?auto=format&fit=crop&q=80&w=800',
+  },
+  {
+    question: '2028 U.S. Presidential Election winner?',
+    description: 'Resolves to the winner of the 2028 United States Presidential Election.',
+    category: 'Politics',
+    yesPrice: 0.20,
+    volume: 150000000,
+    participants: 120,
+    daysFromNow: 900,
+    imageUrl: 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?auto=format&fit=crop&q=80&w=800',
+  },
+  {
+    question: 'Will Bitcoin reach $150,000 in 2026?',
+    description: 'Resolves YES if BTC/USD spot price reaches $150k on any major exchange.',
     category: 'Crypto',
-    yesPrice: 0.72,
-    volume: 850000,
-    participants: 4200,
-    daysFromNow: 60,
+    yesPrice: 0.68,
+    volume: 12500000,
+    participants: 45000,
+    daysFromNow: 180,
     imageUrl: 'https://images.unsplash.com/photo-1518546305927-5a555bb7020d?auto=format&fit=crop&q=80&w=800',
   },
   {
-    question: 'Will Ethereum hit $5,000 by Q3 2026?',
-    description: 'Resolves YES if ETH/USD spot price reaches $5,000 on Binance or Coinbase.',
-    category: 'Crypto',
-    yesPrice: 0.41,
-    volume: 430000,
-    participants: 2100,
-    daysFromNow: 90,
-    imageUrl: 'https://images.unsplash.com/photo-1621761191319-c6fb62004040?auto=format&fit=crop&q=80&w=800',
-  },
-  {
-    question: 'Will the Federal Reserve cut rates in June 2026?',
-    description: 'Resolves YES if the FOMC announces a rate cut at their June 2026 meeting.',
-    category: 'Politics',
-    yesPrice: 0.58,
-    volume: 1200000,
-    participants: 8500,
-    daysFromNow: 45,
-    imageUrl: 'https://images.unsplash.com/photo-1611974717537-43a9f0203f1a?auto=format&fit=crop&q=80&w=800',
-  },
-  {
-    question: 'Will OpenAI release GPT-5 before September 2026?',
-    description: 'Resolves YES if OpenAI officially releases a model named GPT-5 publicly before September 1, 2026.',
-    category: 'AI',
-    yesPrice: 0.65,
-    volume: 620000,
-    participants: 3800,
+    question: 'Will Pepe (PEPE) flip Shiba Inu (SHIB) in market cap?',
+    description: 'Resolves YES if PEPE market capitalization exceeds SHIB market capitalization.',
+    category: 'Memes',
+    yesPrice: 0.35,
+    volume: 4500000,
+    participants: 12000,
     daysFromNow: 120,
+    imageUrl: 'https://images.unsplash.com/photo-1620712943543-bcc4628c71d5?auto=format&fit=crop&q=80&w=800',
+  },
+  {
+    question: 'Will OpenAI release an ASI (Superintelligence) model before 2027?',
+    description: 'Resolves YES if OpenAI makes a public announcement regarding an ASI model release.',
+    category: 'AI',
+    yesPrice: 0.28,
+    volume: 9500000,
+    participants: 35000,
+    daysFromNow: 220,
     imageUrl: 'https://images.unsplash.com/photo-1677442136019-21780ecad995?auto=format&fit=crop&q=80&w=800',
   },
   {
-    question: 'Will Solana (SOL) reach $500 in 2026?',
-    description: 'Resolves YES if SOL/USD trades at or above $500 on any major exchange.',
-    category: 'Crypto',
-    yesPrice: 0.34,
-    volume: 310000,
-    participants: 1900,
-    daysFromNow: 180,
-    imageUrl: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?auto=format&fit=crop&q=80&w=800',
-  },
-  {
-    question: 'Will Apple release an AI-native iPhone before 2027?',
-    description: 'Resolves YES if Apple launches an iPhone product marketed with on-device AI as the primary feature.',
-    category: 'AI',
-    yesPrice: 0.82,
-    volume: 540000,
-    participants: 6100,
-    daysFromNow: 200,
-    imageUrl: 'https://images.unsplash.com/photo-1616348436168-de43ad0db179?auto=format&fit=crop&q=80&w=800',
-  },
-  {
-    question: 'Will Dogecoin reach $1.00 before the end of 2026?',
-    description: 'Resolves YES if DOGE/USD spot price hits $1.00 on a major exchange.',
-    category: 'Crypto',
-    yesPrice: 0.22,
-    volume: 195000,
-    participants: 1400,
-    daysFromNow: 240,
-    imageUrl: 'https://images.unsplash.com/photo-1622790694515-6d629f37c547?auto=format&fit=crop&q=80&w=800',
-  },
-  {
-    question: 'Will SpaceX land humans on Mars before 2030?',
-    description: 'Resolves YES if SpaceX successfully lands a crewed mission on Mars before January 1, 2030.',
+    question: 'Will X (Twitter) launch a crypto wallet in 2026?',
+    description: 'Resolves YES if X officially launches a built-in cryptocurrency wallet.',
     category: 'Social',
-    yesPrice: 0.18,
-    volume: 780000,
-    participants: 5200,
-    daysFromNow: 365,
-    imageUrl: 'https://images.unsplash.com/photo-1614728263952-84ea256f9679?auto=format&fit=crop&q=80&w=800',
+    yesPrice: 0.55,
+    volume: 5200000,
+    participants: 18000,
+    daysFromNow: 150,
+    imageUrl: 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?auto=format&fit=crop&q=80&w=800',
   },
 ];
 
@@ -304,12 +274,17 @@ export async function seedFallbackMarkets(): Promise<void> {
     });
 
     await prisma.pricePoint.createMany({
-      data: adjustedHistory.map((p) => ({
-        id: newId(),
-        marketId,
-        yesPrice: parseFloat(Math.max(0.01, Math.min(0.99, p)).toFixed(4)),
-        noPrice: parseFloat(Math.max(0.01, Math.min(0.99, 1 - p)).toFixed(4)),
-      })),
+      data: adjustedHistory.map((p, i) => {
+        const now = Date.now();
+        const interval = (30 * 24 * 60 * 60 * 1000) / adjustedHistory.length; // 30 days spread for fallback
+        return {
+          id: newId(),
+          marketId,
+          yesPrice: parseFloat(Math.max(0.01, Math.min(0.99, p)).toFixed(4)),
+          noPrice: parseFloat(Math.max(0.01, Math.min(0.99, 1 - p)).toFixed(4)),
+          ts: new Date(now - (adjustedHistory.length - 1 - i) * interval),
+        };
+      }),
     });
   }
   console.log(`[MarketDataService] Seeded ${FALLBACK_MARKETS.length} fallback markets.`);

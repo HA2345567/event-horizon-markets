@@ -4,6 +4,7 @@ import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "./Logo";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
+import { FaucetButton } from "./FaucetButton";
 
 const NAV = [
   { to: "/markets", label: "Markets" },
@@ -62,10 +63,11 @@ export function Header() {
               Docs
             </Link>
           )}
+          {!onLanding && <FaucetButton className="hidden sm:flex" />}
           <ConnectWalletButton className="heliora-wallet" />
           <Link
             to="/markets/create"
-            className="group relative overflow-hidden rounded-md bg-foreground px-4 py-1.5 text-sm font-semibold text-background transition-all hover:opacity-90 hover:shadow-[0_0_20px_-5px_rgba(255,255,255,0.4)]"
+            className="group relative overflow-hidden rounded-md bg-foreground px-4 py-1.5 text-sm font-semibold text-background transition-all hover:opacity-90"
           >
             <span className="relative z-10">Launch App</span>
             <div className="absolute inset-0 z-0 bg-gradient-to-tr from-white/10 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />

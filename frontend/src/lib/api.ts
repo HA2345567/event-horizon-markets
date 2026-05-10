@@ -111,6 +111,13 @@ export const api = {
       }[];
     }>("/api/portfolio"),
 
+  // Faucet
+  requestFaucet: (wallet: string) =>
+    req<{ success: boolean }>("/api/faucet", {
+      method: "POST",
+      body: JSON.stringify({ wallet }),
+    }),
+
   // Agents
   listAgents: (params?: { type?: string; status?: "live" | "paused"; sort?: "aum" | "pnl" | "winRate" | "sharpe"; limit?: number }) => {
     const qs = new URLSearchParams();

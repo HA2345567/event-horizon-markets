@@ -3,13 +3,9 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './prisma';
 
-// Load environment variables
 dotenv.config();
-
-// Initialize Prisma
-export const prisma = new PrismaClient();
 
 // Initialize Express and HTTP server
 const app = express();
@@ -40,7 +36,7 @@ import liveRouter from './routes/live';
 import faucetRouter from './routes/faucet';
 import { initializeWebSocket } from './routes/ws';
 import { AgentRunner } from './utils/agent-runner';
-import { syncKalshiMarkets, seedFallbackMarkets } from './utils/market-data-service';
+import { syncKalshiMarkets, seedFallbackMarkets, clearAllMarkets } from './utils/market-data-service';
 
 // Health check endpoint
 app.get('/api/health', (_req, res) => {

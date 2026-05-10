@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { prisma } from '../index';
+import { prisma } from '../prisma';
 import { newId, generatePriceHistory } from '../utils/helpers';
 
 const router = express.Router();

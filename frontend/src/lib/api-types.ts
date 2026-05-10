@@ -2,7 +2,7 @@
 
 export const CATEGORIES = [
   "Crypto", "Politics", "Sports", "Memes",
-  "NFTs", "DeFi", "Social", "AI",
+  "NFTs", "DeFi", "Social", "AI", "Weather",
 ] as const;
 export type MarketCategory = (typeof CATEGORIES)[number];
 
@@ -40,6 +40,8 @@ export interface ApiMarket {
   createdAt: string;
   imageUrl?: string | null;
   oracleResolution?: ApiOracleResolution | null;
+  outcome_mints: string[];
+  winning_outcome_index?: number | null;
 }
 
 export interface ApiPricePoint { yesPrice: number; noPrice: number; ts: string }

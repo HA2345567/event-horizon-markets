@@ -5,7 +5,7 @@
  */
 
 import express, { Request, Response } from 'express';
-import { prisma } from '../index';
+import { prisma } from '../prisma';
 import { syncKalshiMarkets, seedFallbackMarkets } from '../utils/market-data-service';
 
 const router = express.Router();

@@ -32,7 +32,7 @@ export default function Live() {
   const { data, isLoading, isError, error, dataUpdatedAt, refetch, isFetching } = useQuery({
     queryKey: ["live", "markets", limit],
     queryFn: () => api.liveMarkets({ status: "open", limit }),
-    refetchInterval: 60_000,           // poll every 60s
+    refetchInterval: 15_000,           // poll every 15s (institutional standard)
     refetchIntervalInBackground: false,
   });
 

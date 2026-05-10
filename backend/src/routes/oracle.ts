@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { prisma } from '../index';
+import { prisma } from '../prisma';
 import { newId } from '../utils/helpers';
 import { callGemini, geminiAvailable } from '../utils/gemini';
 

@@ -1,4 +1,4 @@
-import { prisma } from '../index';
+import { prisma } from '../prisma';
 
 export interface AgentMetrics {
   realizedPnl: number;

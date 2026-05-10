@@ -9,7 +9,7 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 
 // Queue for rate limiting
 let _lastCallTime = 0;
-const MIN_CALL_INTERVAL_MS = 1000; // max 60 RPM on paid tier
+const MIN_CALL_INTERVAL_MS = 2000; // max 30 RPM to be safe
 
 async function throttle(): Promise<void> {
   const now = Date.now();
@@ -23,7 +23,7 @@ export interface GeminiResponse {
   json: <T>() => T | null;
 }
 
-export async function callGemini(prompt: string, retries = 3): Promise<GeminiResponse> {
+export async function callGemini(prompt: string, retries = 5): Promise<GeminiResponse> {
   if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not configured');
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;

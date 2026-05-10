@@ -9,7 +9,7 @@ import { ArrowUpDown, Filter, Plus, Search, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const CATEGORIES: MarketCategory[] = [
-  "Crypto", "Politics", "Sports", "Memes", "NFTs", "DeFi", "Social", "AI",
+  "Crypto", "Politics", "Sports", "Memes", "NFTs", "DeFi", "Social", "AI", "Weather",
 ];
 type Sort = "volume" | "ending" | "trending" | "newest";
 
@@ -25,7 +25,7 @@ export default function Markets() {
       live: liveOnly || undefined,
       sort,
       search: q.trim() || undefined,
-      take: 60,
+      take: 200,
     }),
     [cat, liveOnly, sort, q],
   );

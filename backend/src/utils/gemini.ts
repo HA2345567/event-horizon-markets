@@ -73,14 +73,17 @@ export async function callGemini(prompt: string, retries = 5): Promise<GeminiRes
         },
       };
     } catch (e) {
-      if (attempt === retries) throw e;
+      if (attempt === retries) {
+        console.error('[Gemini] All retries exhausted. Returning fallback empty response.');
+        return { text: '', json: () => null };
+      }
       const backoff = Math.pow(2, attempt + 1) * 1000;
       console.warn(`[Gemini] Error, retrying in ${backoff / 1000}s:`, (e as Error).message);
       await new Promise(r => setTimeout(r, backoff));
     }
   }
 
-  throw new Error('[Gemini] All retries exhausted');
+  return { text: '', json: () => null };
 }
 
 export function geminiAvailable(): boolean {

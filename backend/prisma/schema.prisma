@@ -3,6 +3,7 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "./generated/client"
 }
 
 datasource db {
@@ -120,6 +121,7 @@ model Trade {
   price     Float
   cost      Float
   fee       Float
+  isSell    Boolean  @default(false)
   txSig     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

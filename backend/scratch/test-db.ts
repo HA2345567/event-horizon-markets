@@ -1,15 +1,17 @@
+
 import { PrismaClient } from '@prisma/client';
+
 const prisma = new PrismaClient();
 
-async function main() {
+async function test() {
   try {
-    const count = await prisma.market.count();
-    console.log(`Connection successful. Market count: ${count}`);
-  } catch (err) {
-    console.error('Connection failed:', err);
-  } finally {
+    await prisma.$connect();
+    console.log('Successfully connected to the database');
     await prisma.$disconnect();
+  } catch (error) {
+    console.error('Failed to connect to the database:', error);
+    process.exit(1);
   }
 }
 
-main();
+test();

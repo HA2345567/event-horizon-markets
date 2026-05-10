@@ -4,7 +4,6 @@ import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "./Logo";
 import { ConnectWalletButton } from "@/components/wallet/ConnectWalletButton";
-import { FaucetButton } from "./FaucetButton";
 
 const NAV = [
   { to: "/markets", label: "Markets" },
@@ -63,7 +62,6 @@ export function Header() {
               Docs
             </Link>
           )}
-          {!onLanding && <FaucetButton className="hidden sm:flex" />}
           <ConnectWalletButton className="heliora-wallet" />
           <Link
             to="/markets/create"

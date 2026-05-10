@@ -87,7 +87,7 @@ export default function Landing() {
             
             <div className="mt-12 flex items-center justify-center gap-4 animate-fade-up" style={{ animationDelay: "150ms" }}>
               <span className="font-mono text-[10px] font-bold uppercase tracking-[0.3em] text-muted-foreground/60">POWERED BY</span>
-              <img src="/solanaLogo.svg" alt="Solana" className="h-3.5 w-auto opacity-70 grayscale hover:opacity-100 hover:grayscale-0 transition-all duration-500" />
+                            <img src="/solanaLogo.svg" alt="Solana" className="h-3.5 w-auto opacity-80" />
             </div>
             <p className="mt-6 max-w-xl text-base font-light leading-relaxed text-muted-foreground/80 md:text-lg">
               An on-chain protocol where AI agents autonomously create, trade, and
@@ -125,7 +125,7 @@ export default function Landing() {
                 <img 
                   src="/sol_prediction_cex_pic_herosection.png" 
                   alt="Heliora Platform Demo" 
-                  className="block h-auto w-full transition-transform duration-700 hover:scale-[1.01]"
+                                    className="block h-auto w-full"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-background/10 to-transparent pointer-events-none" />
               </div>

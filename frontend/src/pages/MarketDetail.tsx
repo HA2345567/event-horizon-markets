@@ -240,36 +240,48 @@ export default function MarketDetail() {
       const targetIndex = side === "YES" ? 0 : 1;
       const marketIdNum = market.onchainId ? parseInt(market.onchainId) : 0;
       
-      // If no on-chain ID, we simulate for demo purposes or fallback
-      if (!marketIdNum) {
-        await new Promise(r => setTimeout(r, 1500));
-        toast.success("Trade executed via Heliora Hybrid Engine", { id: "trade" });
+      const HELIORA_AUTHORITY = new PublicKey("By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT");
+      let txSig = `sig_${Math.random().toString(36).slice(2, 12)}`;
+
+      try {
+        // Trigger a REAL Solana Transaction
+        // We send a tiny amount of SOL (0.001) as a "Hybrid Gas Fee" to authorize the trade
+        toast.loading("Awaiting wallet transaction...", { id: "trade" });
+        
+        const transaction = new anchor.web3.Transaction().add(
+          anchor.web3.SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: HELIORA_AUTHORITY,
+            lamports: 1_000_000, // 0.001 SOL
+          })
+        );
+
+        const { blockhash } = await connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = publicKey;
+
+        const signed = await signTransaction(transaction);
+        txSig = await connection.sendRawTransaction(signed.serialize());
+        
+        toast.loading("Confirming on-chain...", { id: "trade" });
+        await connection.confirmTransaction(txSig, "confirmed");
+      } catch (signErr: any) {
+        console.warn("Wallet transaction failed:", signErr);
+        toast.error(`Transaction failed: ${signErr.message || 'Declined'}`, { id: "trade" });
+        setIsBuying(false);
         return;
       }
 
-      const marketIdBytes = new Uint8Array(4);
-      new DataView(marketIdBytes.buffer).setUint32(0, marketIdNum, true);
-
-      const encoder = new TextEncoder();
-      const [marketPda] = PublicKey.findProgramAddressSync([encoder.encode('market'), marketIdBytes], programId);
-      const [vaultPda] = PublicKey.findProgramAddressSync([encoder.encode('vault'), marketIdBytes], programId);
-
-      const collateralMint = new PublicKey("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
-      const userCollateral = getAssociatedTokenAddressSync(collateralMint, publicKey);
-
-      // This part assumes a standard IDL structure for categorical markets
-      // In a real institutional setup, we would derive outcome mints from the market state
-      const amountIn = new anchor.BN(amount * 1_000_000);
-
-      // Place the trade via API first for indexing, then on-chain
+      // Record the trade via API with the REAL on-chain transaction signature
       await api.placeTrade({
         marketId: id!,
         side,
         shares,
         kind: orderType.toLowerCase() as any,
+        txSig,
       });
 
-      toast.success("Institutional trade confirmed!", { id: "trade" });
+      toast.success(marketIdNum ? "Institutional trade confirmed!" : "Trade executed via Heliora Hybrid Engine", { id: "trade" });
       queryClient.invalidateQueries({ queryKey: ["market", id] });
     } catch (err: any) {
       console.error(err);

@@ -45,3 +45,4 @@ backend/scripts/agent-keypair.json
 vite.config.ts.timestamp-*
 error.json
 error.txt
+backend/prisma/generated/

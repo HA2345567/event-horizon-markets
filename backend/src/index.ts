@@ -68,27 +68,33 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 // Start server
 const startServer = async () => {
   try {
-    // Test database connection
-    await prisma.$connect();
-    console.log('✓ Database connected successfully');
-
-    httpServer.listen(Number(PORT), '0.0.0.0', () => {
-      console.log(`✓ Server running on http://localhost:${PORT}`);
-      console.log(`✓ WebSocket available at ws://localhost:${PORT}/ws/:marketId`);
+    // In Cloud Run, we should listen as soon as possible to pass health checks
+    httpServer.listen(Number(PORT), '0.0.0.0', async () => {
+      console.log(`✓ Server listening on 0.0.0.0:${PORT}`);
       console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
       
-      // Sync real-time markets from Kalshi (fallback to curated set)
-      console.log('✓ Syncing real-time markets...');
-      syncKalshiMarkets()
-        .then(n => {
-          if (n === 0) return seedFallbackMarkets();
-          return;
-        })
-        .catch(() => seedFallbackMarkets())
-        .finally(() => console.log('✓ Live markets ready'));
-      
-      // Start autonomous agents
-      AgentRunner.start(30000); // Tick every 30 seconds
+      try {
+        // Test database connection in background
+        console.log('... Connecting to database');
+        await prisma.$connect();
+        console.log('✓ Database connected successfully');
+        
+        // Sync real-time markets from Kalshi (fallback to curated set)
+        console.log('✓ Syncing real-time markets...');
+        syncKalshiMarkets()
+          .then(n => {
+            if (n === 0) return seedFallbackMarkets();
+            return;
+          })
+          .catch(() => seedFallbackMarkets())
+          .finally(() => console.log('✓ Live markets ready'));
+        
+        // Start autonomous agents
+        AgentRunner.start(30000); // Tick every 30 seconds
+      } catch (dbError) {
+        console.error('✗ Database connection failed:', dbError);
+        // We don't exit here so the health check endpoint can still respond
+      }
     });
   } catch (error) {
     console.error('✗ Failed to start server:', error);
@@ -104,6 +110,14 @@ process.on('SIGINT', async () => {
     console.log('Server closed');
     process.exit(0);
   });
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ Unhandled Rejection at:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Uncaught Exception:', err);
 });
 
 startServer();

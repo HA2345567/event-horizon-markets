@@ -134,11 +134,26 @@ router.post('/:agentId/subscribe', async (req: Request, res: Response): Promise<
       return;
     }
 
+    // Ensure user exists in our DB
+    let user = await prisma.user.findUnique({
+      where: { wallet: xWallet },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          id: newId(),
+          wallet: xWallet,
+          handle: xWallet.slice(0, 6),
+        },
+      });
+    }
+
     const subscription = await prisma.subscription.create({
       data: {
         id: newId(),
         agentId,
-        userId: xWallet,
+        userId: user.id, // Use the actual user UUID
         capital: body.capital,
       },
     });

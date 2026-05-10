@@ -44,6 +44,21 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     const cost = parseFloat((body.shares * price).toFixed(2));
     const fee = parseFloat((cost * 0.01).toFixed(4));
 
+    // Ensure user exists in our DB
+    let user = await prisma.user.findUnique({
+      where: { wallet: xWallet },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          id: newId(),
+          wallet: xWallet,
+          handle: xWallet.slice(0, 6),
+        },
+      });
+    }
+
     // Verify on-chain transaction if txSig provided and not a demo wallet
     if (!xWallet.startsWith('demo_')) {
       if (!body.txSig) {
@@ -67,7 +82,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       data: {
         id: newId(),
         marketId: body.marketId,
-        userId: xWallet,
+        userId: user.id, // Use the actual user UUID
         wallet: xWallet,
         isAgent: false,
         side,
@@ -76,6 +91,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         price: parseFloat(price.toFixed(4)),
         cost,
         fee,
+        isSell: !!body.isSell,
         txSig: body.txSig || `sig_${newId().slice(0, 12)}`,
       },
     });
@@ -116,7 +132,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       where: {
         marketId_userId: {
           marketId: body.marketId,
-          userId: xWallet,
+          userId: user.id,
         },
       },
     });
@@ -182,7 +198,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         data: {
           id: newId(),
           marketId: body.marketId,
-          userId: xWallet,
+          userId: user.id,
           yesShares: side === 'YES' ? body.shares : 0,
           noShares: side === 'NO' ? body.shares : 0,
           avgYesCost: side === 'YES' ? parseFloat(price.toFixed(4)) : 0,
@@ -325,6 +341,7 @@ router.get('/portfolio', async (req: Request, res: Response): Promise<void> => {
 
     const trades = await prisma.trade.findMany({
       where: { userId: xWallet },
+      include: { market: true },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });

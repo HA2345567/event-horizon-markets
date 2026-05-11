@@ -59,21 +59,22 @@ async function diagnose() {
   }
   console.log('');
 
-  // 4. Check Gemini API
-  console.log('🤖 Testing Gemini API Availability...');
-  if (!process.env.GEMINI_API_KEY) {
-    console.log('  ⚠️ Skipping Gemini test (API key missing)');
+  // 4. Check Vertex AI Availability
+  console.log('🤖 Testing Vertex AI Availability...');
+  if (!process.env.GOOGLE_CLOUD_PROJECT) {
+    console.log('  ⚠️ Skipping Vertex AI test (Project ID missing)');
   } else {
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`);
-      if (res.ok) {
-        console.log('  ✅ Gemini API reachable and Key is valid.');
+      const { callGemini } = await import('../src/utils/gemini');
+      const res = await callGemini('Hello, this is a diagnostic test. Respond with {"status": "ok"}');
+      if (res.text) {
+        console.log('  ✅ Vertex AI reachable and responding.');
+        console.log(`     Response: ${res.text.substring(0, 50)}...`);
       } else {
-        const data = await res.json();
-        console.log(`  ❌ Gemini API Error: ${res.status} - ${data.error?.message || 'Unknown error'}`);
+        console.log(`  ❌ Vertex AI returned empty response.`);
       }
     } catch (error: any) {
-      console.log(`  ❌ Gemini API unreachable: ${error.message}`);
+      console.log(`  ❌ Vertex AI Error: ${error.message}`);
     }
   }
 

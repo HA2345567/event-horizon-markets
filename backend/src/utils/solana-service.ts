@@ -33,9 +33,13 @@ export class SolanaService {
   }
 
   private getMarketIdNum(uuid: string): number {
-    if (!uuid || typeof uuid !== 'string') return Math.floor(Math.random() * 0xFFFFFFFF);
+    if (!uuid || typeof uuid !== 'string' || uuid.length < 8) {
+      return Math.floor(Math.random() * 0x7FFFFFFF);
+    }
     try {
-      const hash = Buffer.from(uuid.replace(/-/g, ''), 'hex');
+      const cleanUuid = uuid.replace(/-/g, '');
+      if (!cleanUuid) return Math.floor(Math.random() * 0x7FFFFFFF);
+      const hash = Buffer.from(cleanUuid.substring(0, 8), 'hex');
       return hash.readUInt32LE(0);
     } catch (e) {
       return Math.floor(Math.random() * 0xFFFFFFFF);

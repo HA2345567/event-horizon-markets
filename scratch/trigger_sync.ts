@@ -1,5 +1,5 @@
-import { runMarketCreatorAgent } from './backend/src/utils/agent-runner';
-import { prisma } from './backend/src/index';
+import { runMarketCreatorAgent } from '../backend/src/utils/agent-runner';
+import { prisma } from '../backend/src/prisma';
 
 async function main() {
   console.log('🚀 Triggering manual institutional market sync...');

@@ -101,15 +101,15 @@ export async function runMarketCreatorAgent(): Promise<void> {
 
   const filtered = combined.filter(m => {
     const q = m.question.toLowerCase();
-    const isJunk = m.question.includes(':') || 
-                   m.question.includes(',') || 
-                   q.startsWith('yes ') ||
-                   q.includes('over ') || q.includes('under ') || 
-                   q.includes('points scored') || q.includes('goals scored') ||
-                   q.includes('pointers') || q.includes('rebounds') ||
-                   q.includes('total points') || q.includes('points in') ||
-                   q.includes('yardage') || q.includes('touchdown') ||
-                   q.includes('winner of') || q.includes('scored by');
+    const isJunk = m.question.includes(':') ||
+      m.question.includes(',') ||
+      q.startsWith('yes ') ||
+      q.includes('over ') || q.includes('under ') ||
+      q.includes('points scored') || q.includes('goals scored') ||
+      q.includes('pointers') || q.includes('rebounds') ||
+      q.includes('total points') || q.includes('points in') ||
+      q.includes('yardage') || q.includes('touchdown') ||
+      q.includes('winner of') || q.includes('scored by');
     return !isJunk;
   });
 
@@ -146,13 +146,13 @@ Respond ONLY with JSON:
   "category": "Crypto"|"Politics"|"Sports"|"Memes"|"NFTs"|"DeFi"|"Social"|"AI"
 }`;
 
-        const r = await callGemini(prompt); 
+        const r = await callGemini(prompt);
         const parsed = r.json<{ mirror: boolean; odds: number; reason: string; category: string }>();
-        
+
         if (parsed && parsed.mirror) {
           const cat = parsed.category || mapCategory(m.category);
           const marketId = newId();
-          
+
           await prisma.market.create({
             data: {
               id: marketId,
@@ -187,7 +187,11 @@ Respond ONLY with JSON:
             })),
           });
 
-          await solanaService.createMarketOnChain({ id: marketId, endsAt });
+          await solanaService.createMarketOnChain({
+            id: marketId,
+            endsAt,
+            question: m.question.slice(0, 100)
+          });
           console.log(`[CreatorAgent] ✅ SUCCESS: Mirrored "${m.question.slice(0, 45)}" from ${m.source.toUpperCase()}`);
         }
       } catch (e) {
@@ -415,7 +419,8 @@ export async function runResolutionAgent(): Promise<void> {
 
     // Resolve on Solana
     if (!isDisputed) {
-      await solanaService.resolveMarketOnChain(market.id, winner);
+      const winningIndex = winner === 'YES' ? 0 : 1;
+      await solanaService.resolveMarketOnChain(market.id, winningIndex);
     }
 
     console.log(`[ResolutionAgent] ✅ Resolved "${market.question.slice(0, 50)}" → ${isDisputed ? 'DISPUTED' : winner}`);

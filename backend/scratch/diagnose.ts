@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { Connection } from '@solana/web3.js';
 import * as dotenv from 'dotenv';
-import path from 'path';
+import * as path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 

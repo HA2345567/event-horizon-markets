@@ -9,7 +9,9 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node",
     "baseUrl": ".",
-    "typeRoots": ["./backend/node_modules/@types"]
+    "paths": {
+      "*": ["node_modules/*", "backend/node_modules/*"]
+    }
   },
-  "include": ["scratch/**/*", "src/**/*"]
+  "include": ["scratch/**/*", "src/**/*", "backend/src/**/*", "frontend/src/**/*"]
 }

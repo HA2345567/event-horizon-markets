@@ -1,12 +1,9 @@
 import * as anchor from '@coral-xyz/anchor';
 import { Connection, Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import fs from 'fs';
-import path from 'path';
-import dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
 import { IDL } from './idl';
-
-dotenv.config();
 
 export class SolanaService {
   private connection: Connection;
@@ -46,8 +43,8 @@ export class SolanaService {
     }
   }
 
-  async createMarketOnChain(marketData: { 
-    id: string; 
+  async createMarketOnChain(marketData: {
+    id: string;
     question: string;
     endsAt: Date;
     outcomesCount?: number;
@@ -59,7 +56,7 @@ export class SolanaService {
       const outcomesCount = marketData.outcomesCount || 2;
       const resSource = marketData.resolutionSource || 'authority';
       const resolutionSource = { [resSource.charAt(0).toUpperCase() + resSource.slice(1)]: {} };
-      
+
       const marketIdNum = this.getMarketIdNum(marketData.id);
       const marketIdBytes = Buffer.alloc(4);
       marketIdBytes.writeUInt32LE(marketIdNum, 0);
@@ -80,13 +77,13 @@ export class SolanaService {
 
       const tx = await this.program.methods
         .initializeMarket(
-            marketIdNum, 
-            marketData.question, 
-            resolutionSource, 
-            deadline, 
-            outcomesCount,
-            strikePrice,
-            pythFeed
+          marketIdNum,
+          marketData.question,
+          resolutionSource,
+          deadline,
+          outcomesCount,
+          strikePrice,
+          pythFeed
         )
         .accounts({
           market: marketPda,
@@ -151,7 +148,7 @@ export class SolanaService {
   async verifyTransaction(signature: string): Promise<boolean> {
     try {
       if (!signature) return false;
-      
+
       // Allow internal hybrid signatures for simulation/demo
       if (signature.startsWith('sig_') || signature.startsWith('hybrid_')) {
         return true;
@@ -168,13 +165,29 @@ export class SolanaService {
           status.value.confirmationStatus === 'finalized'
         );
       }
-      
+
       // Fallback for demo or when signature is not found yet but might be valid
       // In a real production app, we would wait or retry
-      return signature.length > 32; 
+      return signature.length > 32;
     } catch (e) {
       console.warn('[SolanaService] Verification error:', e);
       return false;
+    }
+  }
+
+  /**
+   * Mints mock USDC for testing purposes (Devnet only)
+   */
+  async mintMockUsdc(wallet: string, amount: number): Promise<string> {
+    try {
+      console.log(`[SolanaService] Minting ${amount} mock USDC to ${wallet}`);
+      // In a real implementation, this would call an on-chain instruction
+      // For now, return a mock transaction signature
+      const sig = `sig_faucet_${Math.random().toString(36).substring(7)}`;
+      return sig;
+    } catch (error: any) {
+      console.error('[SolanaService] Faucet error:', error);
+      throw new Error(`Failed to mint mock USDC: ${error.message}`);
     }
   }
 }

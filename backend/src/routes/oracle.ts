@@ -1,9 +1,9 @@
-import express, { Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma';
 import { newId } from '../utils/helpers';
 import { callGemini, geminiAvailable } from '../utils/gemini';
 
-const router = express.Router();
+const router = Router();
 
 // Get recent resolutions
 router.get('/recent', async (_req: Request, res: Response): Promise<void> => {

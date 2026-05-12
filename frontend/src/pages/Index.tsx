@@ -49,7 +49,7 @@ export default function Landing() {
     { label: "Avg Settlement", value: "412ms", sub: "p95 · sub-slot" },
   ];
 
-  const tickerMarkets = trending.data?.markets ?? [];
+  const tickerMarkets = trending.data?.markets || [];
 
   return (
     <PageShell>
@@ -204,7 +204,7 @@ export default function Landing() {
             ? Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="h-[260px] animate-shimmer rounded-xl border border-border bg-surface" />
               ))
-            : trending.data?.markets.slice(0, 6).map((m) => <MarketCard key={m.id} market={m} />)}
+            : (trending.data?.markets || []).slice(0, 6).map((m) => <MarketCard key={m.id} market={m} />)}
         </div>
       </section>
 

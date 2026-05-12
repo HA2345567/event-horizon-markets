@@ -1,8 +1,8 @@
-import express, { Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma';
 import { newId, generatePriceHistory } from '../utils/helpers';
 
-const router = express.Router();
+const router = Router();
 
 interface CreateMarketBody {
   question: string;

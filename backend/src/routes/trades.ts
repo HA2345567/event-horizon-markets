@@ -1,9 +1,9 @@
-import express, { Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma';
 import { newId } from '../utils/helpers';
 import { solanaService } from '../utils/solana-service';
 
-const router = express.Router();
+const router = Router();
 
 interface PlaceTradeBody {
   marketId: string;
@@ -222,8 +222,13 @@ router.post('/redeem', async (req: Request, res: Response): Promise<void> => {
     const { marketId, txSig } = req.body;
     const xWallet = (req.headers['x-wallet'] as string);
 
-    if (!xWallet) {
-      res.status(400).json({ error: 'Wallet address required' });
+    // Ensure user exists and get their UUID
+    const user = await prisma.user.findUnique({
+      where: { wallet: xWallet },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
       return;
     }
 
@@ -232,7 +237,7 @@ router.post('/redeem', async (req: Request, res: Response): Promise<void> => {
     });
 
     if (!market || market.status !== 'resolved') {
-      res.status(400).json({ error: 'Market is not resolved yet' });
+      res.status(400).json({ error: 'Market is not resolved yet or not found' });
       return;
     }
 
@@ -240,7 +245,7 @@ router.post('/redeem', async (req: Request, res: Response): Promise<void> => {
       where: {
         marketId_userId: {
           marketId,
-          userId: xWallet,
+          userId: user.id,
         },
       },
     });
@@ -286,7 +291,7 @@ router.post('/redeem', async (req: Request, res: Response): Promise<void> => {
       data: {
         id: newId(),
         marketId,
-        userId: xWallet,
+        userId: user.id,
         wallet: xWallet,
         side: winningSide === 'YES' ? 'YES' : 'NO',
         kind: 'redeem',
@@ -325,7 +330,11 @@ router.get('/portfolio', async (req: Request, res: Response): Promise<void> => {
   try {
     const xWallet = (req.headers['x-wallet'] as string) || `demo_${newId().slice(0, 8)}.sol`;
 
-    if (!xWallet || xWallet.startsWith('demo_')) {
+    const user = await prisma.user.findUnique({
+      where: { wallet: xWallet },
+    });
+
+    if (!user) {
       res.json({
         summary: { openValue: 0, unrealized: 0, realized: 0, positions: 0 },
         positions: [],
@@ -335,12 +344,12 @@ router.get('/portfolio', async (req: Request, res: Response): Promise<void> => {
     }
 
     const positions = await prisma.position.findMany({
-      where: { userId: xWallet },
+      where: { userId: user.id },
       include: { market: true },
     });
 
     const trades = await prisma.trade.findMany({
-      where: { userId: xWallet },
+      where: { userId: user.id },
       include: { market: true },
       orderBy: { createdAt: 'desc' },
       take: 50,

@@ -1,7 +1,7 @@
-import express, { Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { solanaService } from '../utils/solana-service';
 
-const router = express.Router();
+const router = Router();
 
 router.post('/', async (req: Request, res: Response): Promise<void> => {
   try {

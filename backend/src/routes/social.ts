@@ -1,8 +1,8 @@
-import express, { Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma';
 import { newId } from '../utils/helpers';
 
-const router = express.Router();
+const router = Router();
 
 // Helper to ensure user exists
 async function ensureUser(wallet: string) {

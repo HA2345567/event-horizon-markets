@@ -101,15 +101,17 @@ export async function runMarketCreatorAgent(): Promise<void> {
 
   const filtered = combined.filter(m => {
     const q = m.question.toLowerCase();
-    const isJunk = m.question.includes(':') ||
-      m.question.includes(',') ||
+    const isJunk = m.question.includes(',') ||
+      m.question.includes(':') ||
       q.startsWith('yes ') ||
+      q.startsWith('no ') ||
       q.includes('over ') || q.includes('under ') ||
-      q.includes('points scored') || q.includes('goals scored') ||
+      q.includes('points') || q.includes('goals') ||
       q.includes('pointers') || q.includes('rebounds') ||
-      q.includes('total points') || q.includes('points in') ||
-      q.includes('yardage') || q.includes('touchdown') ||
-      q.includes('winner of') || q.includes('scored by');
+      q.includes('assists') || q.includes('yards') ||
+      q.includes('touchdown') || q.includes('strikeout') ||
+      q.includes('winner of') || q.includes('scored by') ||
+      m.volume < 1000; // Mirror only high-volume institutional markets
     return !isJunk;
   });
 
@@ -512,10 +514,8 @@ export async function runTradingAgents(): Promise<void> {
     });
 
     for (const sub of subscriptions) {
-      // Ensure the subscriber user exists in our User table
-      // In our system, sub.userId stores the wallet address from the frontend
-      const subscriber = await prisma.user.findUnique({ where: { wallet: sub.userId } })
-        ?? await prisma.user.create({ data: { id: newId(), wallet: sub.userId, handle: `user_${sub.userId.slice(0, 5)}` } });
+      const subscriber = await prisma.user.findUnique({ where: { id: sub.userId } });
+      if (!subscriber) continue;
 
       // Calculate share size based on user capital vs agent AUM
       const userTradeShares = Math.max(1, Math.floor((sub.capital / tradePrice) * 0.05));

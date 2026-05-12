@@ -196,6 +196,7 @@ model Comment {
   userId    String?
   user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   wallet    String?  // Store wallet directly if no user profile
+  author    String?  // Display name
   text      String
   isAgent   Boolean  @default(false)
   createdAt DateTime @default(now())

@@ -16,8 +16,8 @@ COPY . .
 # Generate Prisma client
 RUN bun x prisma generate
 
-# Expose the port (GCP Cloud Run uses 8080 by default, but we can configure it)
-EXPOSE 3000
+# Expose the port (GCP Cloud Run uses 8080 by default)
+EXPOSE 8080
 
 # Start the application
 CMD ["bun", "run", "src/index.ts"]

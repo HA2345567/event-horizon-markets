@@ -4,11 +4,11 @@
  * Supports full filtering, pagination, and price refresh.
  */
 
-import express, { Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma';
 import { syncKalshiMarkets, seedFallbackMarkets } from '../utils/market-data-service';
 
-const router = express.Router();
+const router = Router();
 
 // Cache the last sync time to avoid hammering Kalshi
 let lastSyncTime = 0;

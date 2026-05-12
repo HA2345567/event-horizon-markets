@@ -1,87 +1,64 @@
+import * as dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { Connection } from '@solana/web3.js';
-import * as dotenv from 'dotenv';
-import * as path from 'path';
+import { GoogleGenAI } from '@google/genai';
 
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-
-const prisma = new PrismaClient();
+dotenv.config();
 
 async function diagnose() {
-  console.log('🔍 Starting Heliora Backend Diagnosis...\n');
+  console.log('🔍 Starting Heliora Backend Diagnosis (Express Mode)...');
 
   // 1. Check Environment Variables
-  const requiredEnv = [
+  console.log('\n📋 Checking Environment Variables:');
+  const vars = [
     'DATABASE_URL',
     'GEMINI_API_KEY',
-    'SOLANA_RPC_URL',
-    'PROGRAM_ID'
+    'GEMINI_MODEL'
   ];
 
-  console.log('📋 Checking Environment Variables:');
-  requiredEnv.forEach(env => {
-    const value = process.env[env];
-    if (value) {
-      const masked = value.length > 10 ? `${value.substring(0, 6)}...${value.substring(value.length - 4)}` : '***';
-      console.log(`  ✅ ${env}: ${masked}`);
+  vars.forEach(v => {
+    if (process.env[v]) {
+      console.log(`  ✅ ${v}: ${process.env[v]?.substring(0, 8)}...`);
     } else {
-      console.log(`  ❌ ${env}: MISSING`);
+      console.log(`  ❌ ${v}: MISSING`);
     }
   });
-  console.log('');
 
-  // 2. Check Database Connectivity
-  console.log('🗄️ Testing Database Connection (Prisma)...');
+  // 2. Test Database Connection
+  console.log('\n🗄️ Testing Database Connection (Prisma)...');
+  const prisma = new PrismaClient();
   try {
     const start = Date.now();
     await prisma.$connect();
-    // Try a simple query
-    await prisma.market.count();
     console.log(`  ✅ Connected successfully in ${Date.now() - start}ms`);
-  } catch (error: any) {
-    console.log(`  ❌ Database Connection Failed!`);
-    console.log(`     Error: ${error.message}`);
+  } catch (e: any) {
+    console.error(`  ❌ Database connection failed: ${e.message}`);
   } finally {
     await prisma.$disconnect();
   }
-  console.log('');
 
-  // 3. Check Solana RPC
-  console.log('⛓️ Testing Solana RPC Connectivity...');
+  // 3. Test Vertex AI Express Mode
+  console.log('\n🤖 Testing Vertex AI Express Mode Availability...');
   try {
-    const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
-    const connection = new Connection(rpcUrl, 'confirmed');
-    const slot = await connection.getSlot();
-    console.log(`  ✅ Solana RPC reachable. Current Slot: ${slot}`);
-  } catch (error: any) {
-    console.log(`  ❌ Solana RPC Failed!`);
-    console.log(`     Error: ${error.message}`);
-  }
-  console.log('');
+    const client = new GoogleGenAI({
+        vertexai: true,
+        apiKey: process.env.GEMINI_API_KEY || '',
+    });
+    
+    const model = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+    
+    console.log(`  Attempting to reach model: ${model}...`);
+    
+    const result = await client.models.generateContent({
+      model: model,
+      contents: [{ role: 'user', parts: [{ text: 'Hello, are you online?' }] }],
+    });
 
-  // 4. Check Vertex AI Availability
-  console.log('🤖 Testing Vertex AI Availability...');
-  if (!process.env.GOOGLE_CLOUD_PROJECT) {
-    console.log('  ⚠️ Skipping Vertex AI test (Project ID missing)');
-  } else {
-    try {
-      const { callGemini } = await import('../src/utils/gemini');
-      const res = await callGemini('Hello, this is a diagnostic test. Respond with {"status": "ok"}');
-      if (res.text) {
-        console.log('  ✅ Vertex AI reachable and responding.');
-        console.log(`     Response: ${res.text.substring(0, 50)}...`);
-      } else {
-        console.log(`  ❌ Vertex AI returned empty response.`);
-      }
-    } catch (error: any) {
-      console.log(`  ❌ Vertex AI Error: ${error.message}`);
-    }
+    console.log(`  ✅ Vertex AI Response: "${result.text?.trim()}"`);
+    console.log('  🎉 SUCCESS: Your AI agents are now using Express Mode with your credits!');
+  } catch (e: any) {
+    console.error(`  ❌ Vertex AI Express Mode Test Failed: ${e.message}`);
   }
-
-  console.log('\n🏁 Diagnosis Complete.');
 }
 
-diagnose().catch(err => {
-  console.error('Fatal diagnostic error:', err);
-  process.exit(1);
-});
+diagnose().catch(console.error);

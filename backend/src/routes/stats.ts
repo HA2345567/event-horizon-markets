@@ -1,7 +1,7 @@
-import express, { Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma';
 
-const router = express.Router();
+const router = Router();
 
 // Get protocol statistics
 router.get('/protocol', async (_req: Request, res: Response): Promise<void> => {

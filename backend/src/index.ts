@@ -1,123 +1,95 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import 'dotenv/config';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { prisma } from './prisma';
 
-dotenv.config();
+// Modular Routes
+import marketRoutes from './routes/markets';
+import tradeRoutes from './routes/trades';
+import portfolioRoutes from './routes/portfolio';
+import agentRoutes from './routes/agents';
+import liveRoutes from './routes/live';
+import statsRoutes from './routes/stats';
+import oracleRoutes from './routes/oracle';
+import socialRoutes from './routes/social';
+import faucetRoutes from './routes/faucet';
+import { initializeWebSocket } from './routes/ws';
 
-// Initialize Express and HTTP server
+import * as marketDataService from './utils/market-data-service';
+import { AgentRunner } from './utils/agent-runner';
+
+// Environment variables initialized via import 'dotenv/config'
+
 const app = express();
 const httpServer = createServer(app);
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 // Initialize WebSocket
 const wss = new WebSocketServer({ server: httpServer });
+initializeWebSocket(wss);
 
 // Middleware
-const corsOrigin = (process.env.CORS_ORIGIN || '*').replace(/\/$/, '');
 app.use(cors({
-  origin: corsOrigin === '*' ? '*' : corsOrigin,
+  origin: true, // Echoes the origin of the request for development
   credentials: true
 }));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Import routes
-import agentsRouter from './routes/agents';
-import marketsRouter from './routes/markets';
-import tradesRouter from './routes/trades';
-import statsRouter from './routes/stats';
-import oracleRouter from './routes/oracle';
-import portfolioRouter from './routes/portfolio';
-import socialRouter from './routes/social';
-import liveRouter from './routes/live';
-import faucetRouter from './routes/faucet';
-import { initializeWebSocket } from './routes/ws';
-import { AgentRunner } from './utils/agent-runner';
-import { syncKalshiMarkets, seedFallbackMarkets, clearAllMarkets } from './utils/market-data-service';
-
-// Health check endpoint
-app.get('/api/health', (_req, res) => {
+// Health Check
+app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// API Routes
-app.use('/api/agents', agentsRouter);
-app.use('/api/markets', marketsRouter);
-app.use('/api/trades', tradesRouter);
-app.use('/api/stats', statsRouter);
-app.use('/api/oracle', oracleRouter);
-app.use('/api/portfolio', portfolioRouter);
-app.use('/api/social', socialRouter);
-app.use('/api/live', liveRouter);
-app.use('/api/faucet', faucetRouter);
+// Register Routes
+console.log('... Registering API routes');
+app.use('/api/markets', marketRoutes);
+app.use('/api/trades', tradeRoutes);
+app.use('/api/portfolio', portfolioRoutes);
+app.use('/api/agents', agentRoutes);
+app.use('/api/live', liveRoutes);
+app.use('/api/stats', statsRoutes);
+app.use('/api/oracle', oracleRoutes);
+app.use('/api/social', socialRoutes);
+app.use('/api/faucet', faucetRoutes);
+console.log('✓ All API routes registered');
 
-// Initialize WebSocket
-initializeWebSocket(wss);
-
-// Error handling middleware
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal Server Error',
-  });
-});
-
-// Start server
-const startServer = async () => {
+// Start the server
+async function bootstrap() {
   try {
-    // In Cloud Run, we should listen as soon as possible to pass health checks
-    httpServer.listen(Number(PORT), '0.0.0.0', async () => {
-      console.log(`✓ Server listening on 0.0.0.0:${PORT}`);
+    // 1. Start listening immediately so frontend can connect even while we're booting
+    httpServer.listen(PORT, () => {
+      console.log(`✓ Heliora Server listening on 0.0.0.0:${PORT}`);
       console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
-      
-      try {
-        // Test database connection in background
-        console.log('... Connecting to database');
-        await prisma.$connect();
-        console.log('✓ Database connected successfully');
-        
-        // Sync real-time markets from Kalshi (fallback to curated set)
-        console.log('✓ Syncing real-time markets...');
-        syncKalshiMarkets()
-          .then(n => {
-            if (n === 0) return seedFallbackMarkets();
-            return;
-          })
-          .catch(() => seedFallbackMarkets())
-          .finally(() => console.log('✓ Live markets ready'));
-        
-        // Start autonomous agents
-        AgentRunner.start(30000); // Tick every 30 seconds
-      } catch (dbError) {
-        console.error('✗ Database connection failed:', dbError);
-        // We don't exit here so the health check endpoint can still respond
-      }
     });
+
+    // 2. Connect to Database
+    console.log('... Connecting to database');
+    await prisma.$connect();
+    console.log('✓ Database connected successfully');
+
+    // 3. Kick off sync processes in background (non-blocking)
+    console.log('✓ Syncing real-time markets in background...');
+    marketDataService.syncKalshiMarkets()
+      .then(k => console.log(`✓ Kalshi markets synced: ${k}`))
+      .catch(err => console.error('❌ Kalshi Sync Error:', err));
+      
+    marketDataService.syncPolymarketMarkets()
+      .then(p => console.log(`✓ Polymarket markets synced: ${p}`))
+      .catch(err => console.error('❌ Polymarket Sync Error:', err));
+
+    // 4. Start AI Agent Lifecycle
+    console.log('🚀 Starting Heliora AI Agent Runner...');
+    AgentRunner.start();
+    
   } catch (error) {
-    console.error('✗ Failed to start server:', error);
-    process.exit(1);
+    console.error('❌ Bootstrap failed:', error);
+    // Don't exit immediately in dev, let the developer see the error
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
+    }
   }
-};
+}
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('\nShutting down gracefully...');
-  await prisma.$disconnect();
-  httpServer.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error('⚠️ Unhandled Rejection at:', reason);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('⚠️ Uncaught Exception:', err);
-});
-
-startServer();
+bootstrap();

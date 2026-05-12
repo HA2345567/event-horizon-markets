@@ -8,9 +8,10 @@ import { prisma } from '../prisma';
 import { newId, generatePriceHistory } from './helpers';
 
 const KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2';
+const POLYMARKET_BASE = 'https://gamma-api.polymarket.com';
 
 // Public Kalshi API — no auth needed for market list
-async function fetchKalshiMarkets(limit = 100): Promise<any[]> {
+export async function fetchKalshiMarkets(limit = 100): Promise<any[]> {
   try {
     const res = await fetch(`${KALSHI_BASE}/markets?limit=${limit}&status=open`, {
       headers: { 'Accept': 'application/json' },
@@ -19,18 +20,32 @@ async function fetchKalshiMarkets(limit = 100): Promise<any[]> {
     const data = await res.json() as { markets?: any[] };
     return data.markets ?? [];
   } catch (e) {
-    console.warn('[MarketDataService] Could not fetch from Kalshi:', (e as Error).message);
     return [];
   }
 }
 
-function mapKalshiCategory(category: string): string {
-  const c = (category || '').toLowerCase();
-  if (c.includes('crypto') || c.includes('bitcoin') || c.includes('eth') || c.includes('solana')) return 'Crypto';
+export const fetchExternalMarkets = fetchKalshiMarkets;
+
+export async function fetchPolymarketMarkets(limit = 100): Promise<any[]> {
+  try {
+    const res = await fetch(`${POLYMARKET_BASE}/markets?limit=${limit}&active=true&closed=false`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) throw new Error(`Polymarket API error: ${res.status}`);
+    return await res.json() as any[];
+  } catch (e) {
+    console.error('[MarketDataService] Polymarket fetch failed:', e);
+    return [];
+  }
+}
+
+function mapExternalCategory(category: string, title: string = ''): string {
+  const c = (category || '').toLowerCase() + ' ' + (title || '').toLowerCase();
+  if (c.includes('crypto') || c.includes('bitcoin') || c.includes('eth') || c.includes('solana') || c.includes('token')) return 'Crypto';
   if (c.includes('politic') || c.includes('election') || c.includes('president') || c.includes('senate') || c.includes('modi') || c.includes('house') || c.includes('vote') || c.includes('democrat') || c.includes('republican') || c.includes('independence') || c.includes('government')) return 'Politics';
-  if (c.includes('sport') || c.includes('nfl') || c.includes('nba') || c.includes('soccer') || c.includes('cricket') || c.includes('ipl') || c.includes('t20')) return 'Sports';
-  if (c.includes('ai') || c.includes('tech') || c.includes('openai') || c.includes('nvidia') || c.includes('llm') || c.includes('anthropic') || c.includes('apple') || c.includes('google')) return 'AI';
-  if (c.includes('economy') || c.includes('fed') || c.includes('rate') || c.includes('inflation') || c.includes('defi') || c.includes('yield') || c.includes('usdt') || c.includes('usdc') || c.includes('staking') || c.includes('gdp') || c.includes('jobs')) return 'DeFi'; // Using DeFi for economy/finance
+  if (c.includes('sport') || c.includes('nfl') || c.includes('nba') || c.includes('soccer') || c.includes('cricket') || c.includes('ipl') || c.includes('t20') || c.includes('ncaa')) return 'Sports';
+  if (c.includes('ai') || c.includes('tech') || c.includes('openai') || c.includes('nvidia') || c.includes('llm') || c.includes('anthropic') || c.includes('apple') || c.includes('google') || c.includes('sora')) return 'AI';
+  if (c.includes('economy') || c.includes('fed') || c.includes('rate') || c.includes('inflation') || c.includes('defi') || c.includes('yield') || c.includes('usdt') || c.includes('usdc') || c.includes('staking') || c.includes('gdp') || c.includes('jobs')) return 'DeFi'; 
   if (c.includes('weather') || c.includes('temp') || c.includes('storm') || c.includes('hurricane') || c.includes('climate')) return 'Weather';
   if (c.includes('meme') || c.includes('doge') || c.includes('pepe') || c.includes('shib')) return 'Memes';
   if (c.includes('nft') || c.includes('bored ape') || c.includes('punk') || c.includes('floor')) return 'NFTs';
@@ -69,43 +84,46 @@ export async function syncKalshiMarkets(): Promise<number> {
   for (const m of raw) {
     try {
       const ticker: string = m.ticker ?? m.market_id ?? '';
-      const question: string = m.title ?? m.question ?? ticker;
-      const subtitle: string = m.subtitle ?? '';
-      const closeTime: string = m.close_time ?? m.expiration_time ?? '';
-      const yesAsk: number = (m.yes_ask ?? m.last_price ?? 50) / 100;
-      const yesBid: number = (m.yes_bid ?? m.last_price ?? 50) / 100;
+      let question: string = m.title ?? m.question ?? ticker;
+      const subtitle: string = m.subtitle ?? m.yes_sub_title ?? '';
+      const closeTime: string = m.close_time ?? m.expiration_time ?? m.latest_expiration_time ?? '';
+      
+      const yesAsk = parseFloat(String(m.yes_ask ?? m.yes_ask_dollars ?? '0.50'));
+      const yesBid = parseFloat(String(m.yes_bid ?? m.yes_bid_dollars ?? '0.50'));
       const yesPrice = Math.max(0.01, Math.min(0.99, (yesAsk + yesBid) / 2));
-      const volume: number = (m.volume ?? m.volume_24h ?? 0);
-      const openInterest: number = m.open_interest ?? 0;
+      
+      const volumeStr = String(m.volume_24h_fp ?? m.volume_fp ?? m.volume_24h ?? '0');
+      const volume: number = parseFloat(volumeStr);
+      const openInterest: number = parseFloat(String(m.open_interest_fp ?? m.open_interest ?? '0'));
       const status: string = m.status ?? 'open';
 
-      if (!ticker || !question || !closeTime) continue;
+      if (!ticker || !question || !closeTime || isNaN(yesPrice)) continue;
       if (status !== 'open' && status !== 'active') continue;
 
       const endsAt = new Date(closeTime);
       if (isNaN(endsAt.getTime()) || endsAt < new Date()) continue;
 
-      const category = mapKalshiCategory(m.category ?? m.event_category ?? '');
+      const category = mapExternalCategory(m.category ?? m.event_category ?? '');
 
-      // FILTER: Skip 'Player Props', micro-stats, or betting-style markets (Big Picture markets only)
+      // FILTER: Aggressively block parlay-style junk and micro-stats
       const qLower = question.toLowerCase();
-      const isJunk = question.includes(':') || 
-                     question.includes(',') || // Multi-outcome betting lists
-                     qLower.startsWith('yes ') || // "yes TeamA, yes TeamB" style
+      const isJunk = question.includes(',') || 
+                     question.includes(':') || 
+                     qLower.startsWith('yes ') ||
+                     qLower.startsWith('no ') ||
                      qLower.includes('player prop') || 
-                     qLower.includes('pointers made') || 
+                     qLower.includes('pointers') || 
                      qLower.includes('rebounds') || 
                      qLower.includes('assists') || 
                      qLower.includes('yards') || 
                      qLower.includes('touchdown') ||
                      qLower.includes('over ') || 
                      qLower.includes('under ') ||
-                     qLower.includes('points scored') ||
-                     qLower.includes('goals scored') ||
-                     qLower.includes('points in') ||
-                     qLower.includes('total points') ||
-                     qLower.includes('winner of') || // Often niche sports
-                     qLower.includes('scored by');
+                     qLower.includes('scored by') ||
+                     qLower.includes('wins by') ||
+                     qLower.includes('strikeouts') ||
+                     qLower.includes('home run') ||
+                     (volume < 100 && openInterest < 50); // Higher threshold for quality
       
       if (isJunk) continue;
 
@@ -135,7 +153,7 @@ export async function syncKalshiMarkets(): Promise<number> {
 
       const history = generatePriceHistory(yesPrice, 48);
       const now = Date.now();
-      const interval = (7 * 24 * 60 * 60 * 1000) / history.length; // 7 days spread
+      const interval = (7 * 24 * 60 * 60 * 1000) / history.length; 
 
       await prisma.pricePoint.createMany({
         data: history.map((p, i) => ({
@@ -147,7 +165,84 @@ export async function syncKalshiMarkets(): Promise<number> {
         })),
       });
       synced++;
-    } catch (e) {}
+    } catch (e) {
+      console.error('[MarketDataService] Kalshi sync item error:', e);
+    }
+  }
+  return synced;
+}
+
+export async function syncPolymarketMarkets(): Promise<number> {
+  console.log('[MarketDataService] Syncing live Polymarket markets...');
+  const raw = await fetchPolymarketMarkets(100);
+  if (raw.length === 0) return 0;
+
+  let synced = 0;
+  for (const m of raw) {
+    try {
+      const id: string = m.id || m.clobTokenIds?.[0] || '';
+      
+      const event = m.events?.[0] || {};
+      const question: string = m.question || event.title || event.question || '';
+      const description: string = m.description || event.description || '';
+      const endsAtRaw: string = m.endDate || m.end_date || event.endDate || '';
+      
+      let outcomePrices = m.outcomePrices || m.outcome_prices || [];
+      if (typeof outcomePrices === 'string') {
+        try { outcomePrices = JSON.parse(outcomePrices); } catch { outcomePrices = []; }
+      }
+      
+      const yesPrice = parseFloat(String(outcomePrices[0] || m.lastTradePrice || '0.5'));
+      const volume = parseFloat(String(m.volume || m.volume24hr || m.volumeNum || '0'));
+      
+      if (!id || !question || !endsAtRaw || isNaN(yesPrice)) continue;
+      
+      const endsAt = new Date(endsAtRaw);
+      if (isNaN(endsAt.getTime()) || endsAt < new Date()) continue;
+
+      const category = mapExternalCategory(m.group_name || m.category || event.category || '', question);
+
+      const exists = await prisma.market.findFirst({ where: { resolutionDetail: `poly:${id}` } });
+      if (exists) continue;
+
+      const marketId = newId();
+      await prisma.market.create({
+        data: {
+          id: marketId,
+          question: question.slice(0, 250),
+          description: (description || '').slice(0, 500) || `Live prediction market from Polymarket. ID: ${id}`,
+          category,
+          resolution: 'AIOracle',
+          resolutionDetail: `poly:${id}`,
+          endsAt,
+          yesPrice,
+          noPrice: Math.max(0.01, 1 - yesPrice),
+          liquidity: volume > 0 ? volume * 0.05 : 1000,
+          volume: volume,
+          participants: Math.floor(volume / 50) + Math.floor(Math.random() * 100),
+          isLive: true,
+          creator: JSON.stringify({ wallet: 'poly_bridge.sol', handle: 'Polymarket' }),
+          imageUrl: m.image || event.image || getCategoryImage(category),
+        },
+      });
+
+      const history = generatePriceHistory(yesPrice, 48);
+      const now = Date.now();
+      const interval = (7 * 24 * 60 * 60 * 1000) / history.length;
+
+      await prisma.pricePoint.createMany({
+        data: history.map((p, i) => ({
+          id: newId(),
+          marketId,
+          yesPrice: p,
+          noPrice: Math.max(0.01, 1 - p),
+          ts: new Date(now - (history.length - 1 - i) * interval),
+        })),
+      });
+      synced++;
+    } catch (e) {
+      console.error('[MarketDataService] Polymarket sync item error:', e);
+    }
   }
   return synced;
 }

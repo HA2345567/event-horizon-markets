@@ -404,10 +404,7 @@ export default function MarketDetail() {
       };
       setWsOrderbook({
         yes: toRows(socketOrderbook.buyYes ?? []),
-        no: toRows((socketOrderbook.sellYes ?? []).map((r) => ({
-          price: +(1 - r.price).toFixed(4),
-          size: r.size,
-        }))),
+        no: toRows(socketOrderbook.sellYes ?? []),
       });
     }
   }, [socketOrderbook]);
@@ -766,17 +763,17 @@ function buildCandlesFromPoints(pts: ApiPricePoint[], live: number): Candle[] {
     const prev = pts[i];
     const o = prev.yesPrice;
     const c = curr.yesPrice;
-    const variance = Math.abs(c - o) * 0.2 + 0.002 + Math.random() * 0.002;
-    const h = Math.min(0.99, Math.max(o, c) + Math.random() * variance);
-    const l = Math.max(0.01, Math.min(o, c) - Math.random() * variance);
+    const variance = Math.abs(c - o) * 0.1 + (o * 0.05) + Math.random() * (o * 0.05);
+    const h = Math.min(0.999, Math.max(o, c) + variance);
+    const l = Math.max(0.0001, Math.min(o, c) - variance);
     return { o, h, l, c, close: c };
   });
   const last = pts[pts.length - 1];
   const o = last.yesPrice;
   const c = live;
-  const variance = Math.abs(c - o) * 0.2 + 0.002 + Math.random() * 0.002;
-  const h = Math.min(0.99, Math.max(o, c) + Math.random() * variance);
-  const l = Math.max(0.01, Math.min(o, c) - Math.random() * variance);
+  const variance = Math.abs(c - o) * 0.1 + (o * 0.05) + Math.random() * (o * 0.05);
+  const h = Math.min(0.999, Math.max(o, c) + variance);
+  const l = Math.max(0.0001, Math.min(o, c) - variance);
   candles.push({ o, h, l, c, close: c });
   return candles;
 }
@@ -787,11 +784,13 @@ function generateCandles(end: number, trend: number, range: Range): Candle[] {
   const out: Candle[] = [];
   for (let i = 0; i < N; i++) {
     const o = v;
-    v += (Math.random() - 0.5) * 0.045 + (end - v) * 0.05;
-    v = Math.max(0.04, Math.min(0.96, v));
+    // Smoother walk with less extreme spikes
+    v += (Math.random() - 0.5) * 0.015 + (end - v) * 0.03;
+    v = Math.max(0.001, Math.min(0.999, v));
     const c = v;
-    const h = Math.min(0.99, Math.max(o, c) + Math.random() * 0.02);
-    const l = Math.max(0.01, Math.min(o, c) - Math.random() * 0.02);
+    const variance = (v * 0.02) + Math.random() * (v * 0.03);
+    const h = Math.min(0.999, Math.max(o, c) + variance);
+    const l = Math.max(0.0001, Math.min(o, c) - variance);
     out.push({ o, h, l, c, close: c });
   }
   out[out.length - 1] = { ...out[out.length - 1], c: end, close: end };
@@ -1053,8 +1052,10 @@ function generateOrderbook(yesPrice: number) {
     const szY = Math.round(150 + Math.random() * 900);
     const szN = Math.round(150 + Math.random() * 900);
     accY += szY; accN += szN;
-    yes.push({ price: Math.max(0.01, +(yesPrice - (i + 1) * 0.004).toFixed(4)), size: szY, total: accY });
-    no.push({ price: Math.max(0.01, +(1 - yesPrice - (i + 1) * 0.004).toFixed(4)), size: szN, total: accN });
+    // Bids: Slightly below yesPrice
+    yes.push({ price: Math.max(0.0001, +(yesPrice - (i + 1) * 0.001).toFixed(4)), size: szY, total: accY });
+    // Asks: Slightly above yesPrice
+    no.push({ price: Math.min(0.9999, +(yesPrice + (i + 1) * 0.001).toFixed(4)), size: szN, total: accN });
   }
   return { yes, no };
 }
@@ -1554,7 +1555,7 @@ function PredictionCandleChart({ pricePoints, live, range }: { pricePoints: ApiP
 
   const minP = Math.min(...candles.map(c => c.l), live);
   const maxP = Math.max(...candles.map(c => c.h), live);
-  let span = Math.max(0.02, maxP - minP);
+  let span = Math.max(0.001, maxP - minP);
   const domainMin = Math.max(0, minP - span * 0.15);
   const domainMax = Math.min(1, maxP + span * 0.15);
   span = domainMax - domainMin;
@@ -1578,12 +1579,12 @@ function PredictionCandleChart({ pricePoints, live, range }: { pricePoints: ApiP
             const color = isUp ? "#22c55e" : "#ef4444";
             const bodyTop = Math.min(yO, yC);
             const bodyH = Math.max(2, Math.abs(yO - yC));
-            const bw = Math.max(4, cw * 0.8);
+            const bw = Math.max(6, cw * 0.7);
 
             return (
               <g key={i}>
-                <line x1={x} x2={x} y1={yH} y2={yL} stroke={color} strokeWidth="1.5" />
-                <rect x={x - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} rx="1" />
+                <line x1={x} x2={x} y1={yH} y2={yL} stroke={color} strokeWidth="2" />
+                <rect x={x - bw / 2} y={bodyTop} width={bw} height={bodyH} fill={color} rx="1.5" />
               </g>
             );
           })}
@@ -1595,7 +1596,7 @@ function PredictionCandleChart({ pricePoints, live, range }: { pricePoints: ApiP
       <div className="absolute right-0 top-0 bottom-0 w-12 flex flex-col justify-between py-8 pointer-events-none">
         {[0.8, 0.6, 0.4, 0.2].map(p => (
           <span key={p} className="text-[9px] font-mono text-white/20 pr-2 text-right">
-            {((domainMin + span * p) * 100).toFixed(0)}¢
+            {((domainMin + span * p) * 100).toFixed(1)}¢
           </span>
         ))}
       </div>
@@ -1640,7 +1641,7 @@ function PolymarketOrderBook({ yes, no, mid }: { yes: OBRow[]; no: OBRow[]; mid:
               style={{ width: `${(r.total / maxTotal) * 100}%` }}
             />
             <span className="relative font-display text-sm font-bold text-[#ef4444] tabular-nums">
-              {Math.round(r.price * 100)}¢
+              {(r.price * 100).toFixed(1)}¢
             </span>
             <span className="relative text-right font-mono text-xs text-white/60 tabular-nums">
               {r.size.toLocaleString(undefined, { maximumFractionDigits: 0 })}
@@ -1656,11 +1657,13 @@ function PolymarketOrderBook({ yes, no, mid }: { yes: OBRow[]; no: OBRow[]; mid:
       <div className="flex items-center justify-between border-y border-white/5 bg-white/[0.01] px-6 py-3">
         <div className="flex items-center gap-3">
           <span className="text-[10px] font-black uppercase tracking-widest text-white/20">Last</span>
-          <span className="font-display text-lg font-black text-white tabular-nums">{Math.round(mid * 100)}¢</span>
+          <span className="font-display text-lg font-black text-white tabular-nums">{(mid * 100).toFixed(1)}¢</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[10px] font-black uppercase tracking-widest text-white/20">Spread</span>
-          <span className="font-mono text-xs font-bold text-white/60 tabular-nums">1¢</span>
+          <span className="font-mono text-xs font-bold text-white/60 tabular-nums">
+            {((Math.abs((asks[asks.length-1]?.price || 0) - (bids[0]?.price || 0))) * 100).toFixed(2)}¢
+          </span>
         </div>
       </div>
 
@@ -1673,7 +1676,7 @@ function PolymarketOrderBook({ yes, no, mid }: { yes: OBRow[]; no: OBRow[]; mid:
               style={{ width: `${(r.total / maxTotal) * 100}%` }}
             />
             <span className="relative font-display text-sm font-bold text-[#22c55e] tabular-nums">
-              {Math.round(r.price * 100)}¢
+              {(r.price * 100).toFixed(1)}¢
             </span>
             <span className="relative text-right font-mono text-xs text-white/60 tabular-nums">
               {r.size.toLocaleString(undefined, { maximumFractionDigits: 0 })}

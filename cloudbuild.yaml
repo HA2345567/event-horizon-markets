@@ -24,15 +24,15 @@ steps:
       - 'managed'
       - '--allow-unauthenticated'
       - '--set-env-vars'
-      - 'DATABASE_URL=postgresql://neondb_owner:npg_Bvnra4CeN9lj@ep-young-morning-aqw1y9bj-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require,GEMINI_API_KEY=REPLACE_WITH_ACTUAL_KEY,GEMINI_MODEL=gemini-3-flash-preview,NODE_ENV=production,CORS_ORIGIN=*'
+      - 'DATABASE_URL=$_DATABASE_URL,GEMINI_API_KEY=$_GEMINI_API_KEY,GEMINI_MODEL=$_GEMINI_MODEL,NODE_ENV=production,CORS_ORIGIN=*'
 
   # 3. Build Frontend (with the backend URL)
   - name: 'gcr.io/cloud-builders/docker'
     id: 'Build Frontend'
     args: [
       'build',
-      '--build-arg', 'VITE_API_URL=https://heliora-backend-40377961468.asia-east1.run.app',
-      '--build-arg', 'VITE_PRIVY_APP_ID=cmooj9sxq009x0djo8i0uld15',
+      '--build-arg', 'VITE_API_URL=$_VITE_API_URL',
+      '--build-arg', 'VITE_PRIVY_APP_ID=$_VITE_PRIVY_APP_ID',
       '-t', 'gcr.io/$PROJECT_ID/heliora-frontend',
       './frontend'
     ]

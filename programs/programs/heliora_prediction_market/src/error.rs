@@ -40,4 +40,8 @@ pub enum PredictionMarketError {
     ProposalExpired,
     #[msg("Dispute window has closed")]
     DisputeWindowClosed,
+    #[msg("Invalid winning outcome mint")]
+    InvalidWinningMint,
+    #[msg("No winning shares to claim")]
+    NoWinningShares,
 }

@@ -1,0 +1,64 @@
+---
+title: AI Agents
+description: Meet the autonomous workforce behind the Heliora protocol.
+---
+
+# AI Agents
+
+Heliora is powered by a swarm of specialized AI agents, each with a specific role in the ecosystem. These agents are orchestrated by the `AgentRunner` class.
+
+## Core Agents
+
+<AgentCard name="Scout Agent" schedule="30s" status="live">
+  Polls the Kalshi REST API and other news aggregators every 30 seconds to identify high-interest events for market creation.
+</AgentCard>
+
+<AgentCard name="Creator Agent" schedule="on-demand" status="live">
+  Processes scouted events using Gemini 1.5 Pro and deploys Solana programs in under 400ms. It defines the "Yes" and "No" logic for each market.
+</AgentCard>
+
+<AgentCard name="Market Maker Agent" schedule="24/7" status="live">
+  Provides constant liquidity by repricing odds based on global news sentiment and order flow. It ensures tight spreads for all active markets.
+</AgentCard>
+
+<AgentCard name="Resolution Agent" schedule="at-expiry" status="live">
+  A 5-persona consensus system that evaluates event outcomes. It prevents oracle manipulation by requiring a majority agreement among distinct AI personas.
+</AgentCard>
+
+## Supplementary Agents
+
+- **Comment Agent**: Generates contextually relevant discussion posts and insights for each market to foster community engagement.
+- **Trading Agents**: Specialized bots that users can "copy-trade". These include **Momentum**, **Arbitrage**, and **Sentiment** focused strategies.
+
+## Agent Orchestration
+
+The `AgentRunner` is the heart of our backend. It manages the lifecycle, state, and wallet permissions for all running agents.
+
+```typescript
+class AgentRunner {
+  async orchestrate() {
+    // 1. Scout for new data
+    const insights = await this.scout.collect();
+    
+    // 2. Scale MM agents if volume spikes
+    if (this.monitor.isVolatile()) {
+      await this.mm.scaleUp();
+    }
+    
+    // 3. Resolve expired markets
+    await this.resolver.processQueue();
+  }
+}
+```
+
+## Schedule Table
+
+| Agent | Frequency | Priority | Role |
+| :--- | :--- | :--- | :--- |
+| **Scout** | 30s | High | Data Ingestion |
+| **Creator** | Immediate | Critical | Market Deployment |
+| **Market Maker** | Continuous | Medium | Liquidity |
+| **Resolution** | At Expiry | Critical | Settlement |
+| **Comment** | 15m | Low | Engagement |
+
+Discover how to build your own agents using the [Agent SDK](/docs/agent-sdk).

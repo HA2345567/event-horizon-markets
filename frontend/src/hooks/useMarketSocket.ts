@@ -19,6 +19,7 @@ interface MarketMessage {
 export function useMarketSocket(marketId: string | undefined) {
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [orderbook, setOrderbook] = useState<{ buyYes: OrderbookEntry[]; sellYes: OrderbookEntry[] } | null>(null);
+  const [lastSocialEvent, setLastSocialEvent] = useState<any>(null);
   const [status, setStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -26,8 +27,11 @@ export function useMarketSocket(marketId: string | undefined) {
     if (!marketId) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host; // Use the actual host and port from the window (e.g., localhost:8080)
-    const url = `${protocol}//${host}/ws/${marketId}`;
+    
+    // In dev, apiBaseUrl is usually http://localhost:3001
+    // We want ws://localhost:3001
+    const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace("http", "ws");
+    const url = `${base}/ws/${marketId}`;
 
     console.log(`Connecting to WebSocket: ${url}`);
     const ws = new WebSocket(url);
@@ -40,10 +44,13 @@ export function useMarketSocket(marketId: string | undefined) {
 
     ws.onmessage = (event) => {
       try {
-        const data: MarketMessage = JSON.parse(event.data);
+        const data: any = JSON.parse(event.data);
         if (data.type === 'price') {
           setLivePrice(data.yesPrice);
           setOrderbook(data.orderbook);
+        } else {
+          // Captures trade, comment, and other social events
+          setLastSocialEvent(data);
         }
       } catch (e) {
         console.error('WebSocket parse error:', e);
@@ -65,5 +72,5 @@ export function useMarketSocket(marketId: string | undefined) {
     };
   }, [marketId]);
 
-  return { livePrice, orderbook, status };
+  return { livePrice, orderbook, status, lastSocialEvent };
 }

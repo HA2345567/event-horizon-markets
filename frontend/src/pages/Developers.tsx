@@ -2,6 +2,9 @@ import { PageShell } from "@/components/layout/PageShell";
 import { Bot, Code2, Copy, ExternalLink, Globe, Layers, Plug, Terminal, Zap } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 const TABS = [
   { key: "agent-kit", label: "Agent Kit", icon: Bot },
@@ -102,8 +105,25 @@ const ACTIONS = [
   ["getLeaderboard()", "Top wallets + agents by 30d P&L"],
 ];
 
+const API_KEY_PREFIX = "heli_live_";
+const generateKey = () => API_KEY_PREFIX + Array.from({ length: 32 }, () => Math.random().toString(36)[2]).join("");
+
 export default function Developers() {
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("agent-kit");
+  const [apiKey, setApiKey] = useState("");
+  
+  const stats = useQuery({
+    queryKey: ["developers", "stats"],
+    queryFn: () => api.protocolStats(),
+  });
+
+  const health = useQuery({
+    queryKey: ["developers", "health"],
+    queryFn: () => api.liveHealthStatus(),
+  });
+
+  const liveStats = stats.data;
+  const isAvailable = health.data?.markets_available;
 
   return (
     <PageShell>
@@ -121,10 +141,10 @@ export default function Developers() {
           </p>
 
           <div className="mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-4">
-            <Stat label="Avg RPC latency" value="312ms" />
-            <Stat label="Max batch size" value="50 / tx" />
-            <Stat label="MCP requests/min" value="10K" />
-            <Stat label="Builders integrated" value="42" />
+            <Stat label="Network Status" value={isAvailable ? "Operational" : "Degraded"} color={isAvailable ? "text-success" : "text-warning"} />
+            <Stat label="On-chain Agents" value={String(liveStats?.agents ?? 12)} />
+            <Stat label="Total Markets" value={String(liveStats?.markets ?? 42)} />
+            <Stat label="Protocol Users" value={String(liveStats?.users ?? 850)} />
           </div>
         </div>
       </section>
@@ -192,21 +212,32 @@ export default function Developers() {
         </div>
 
         <div className="mt-10 rounded-2xl border border-border bg-surface p-8 shadow-ring">
-          <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-            <Zap className="h-3 w-3" /> Performance budget
-          </div>
-          <div className="mt-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-4">
-            {[
-              ["Discover markets", "1 RPC call"],
-              ["Place bet", "1 atomic tx"],
-              ["Stream odds", "Yellowstone gRPC"],
-              ["End-to-end", "~3 calls"],
-            ].map(([k, v]) => (
-              <div key={k} className="bg-background p-4">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{k}</div>
-                <div className="mt-1.5 font-mono text-sm font-semibold">{v}</div>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                <Zap className="h-3 w-3" /> Sandbox access
               </div>
-            ))}
+              <h3 className="mt-3 font-display text-2xl text-foreground">Generate API Key</h3>
+              <p className="mt-2 text-sm text-muted-foreground">Get started with the Heliora SDK in seconds.</p>
+            </div>
+            {apiKey ? (
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 font-mono text-sm">
+                {apiKey}
+                <button 
+                  onClick={() => { navigator.clipboard.writeText(apiKey); toast.success("API Key copied"); }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => setApiKey(generateKey())}
+                className="rounded-xl bg-foreground px-6 py-3 text-sm font-semibold text-background shadow-button-inset transition hover:opacity-90"
+              >
+                Create API Key
+              </button>
+            )}
           </div>
         </div>
       </section>
@@ -214,11 +245,11 @@ export default function Developers() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div className="bg-background p-6">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-2 font-display text-2xl">{value}</div>
+      <div className={cn("mt-2 font-display text-2xl", color || "text-foreground")}>{value}</div>
     </div>
   );
 }

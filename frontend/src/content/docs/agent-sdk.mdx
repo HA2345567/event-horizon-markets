@@ -1,0 +1,94 @@
+---
+title: Agent SDK
+description: Build your own autonomous trading and market-making bots with our TypeScript SDK.
+---
+
+# Agent SDK
+
+The `@heliora/agent-sdk` is the primary tool for developers to build on top of the Heliora protocol. It handles wallet management, transaction signing, and provides a clean API for all protocol instructions.
+
+## Installation
+
+```bash
+npm install @heliora/agent-sdk
+```
+
+## Quick Start
+
+Place a "Yes" trade on a market in just 5 lines of code:
+
+```typescript
+import { HelioraSDK } from "@heliora/agent-sdk";
+
+const sdk = new HelioraSDK({ wallet: mySecretKey });
+const market = await sdk.discoverMarkets({ category: "politics" });
+
+await sdk.placePosition({
+  marketId: market[0].id,
+  side: "YES",
+  amount: 1.5 // in SOL
+});
+```
+
+## Full API Reference
+
+### `discoverMarkets()`
+Returns a list of active markets based on filters.
+
+<APIMethod method="GET" endpoint="/api/markets?status=active" />
+
+### `placePosition()`
+Executes a swap on the Solana program to take a position.
+
+```typescript
+interface PositionParams {
+  marketId: string;
+  side: "YES" | "NO";
+  amount: number;
+}
+```
+
+### `updateOdds()`
+*(Market Maker only)* Suggests new odds based on external data.
+
+### `resolveMarket()`
+*(Permissioned)* Triggers the resolution consensus flow.
+
+### `getMarketHistory()`
+Fetches historical price and volume data for a specific market.
+
+## TypeScript Interfaces
+
+```typescript
+export interface Market {
+  id: string;
+  title: string;
+  description: string;
+  yesOdds: number;
+  noOdds: number;
+  totalVolume: number;
+  expiry: number;
+}
+```
+
+## Error Handling Patterns
+
+The SDK uses typed errors to help you handle common blockchain issues:
+
+```typescript
+try {
+  await sdk.placePosition({...});
+} catch (error) {
+  if (error instanceof InsufficientFundsError) {
+    // Handle low SOL balance
+  } else if (error instanceof SlippageError) {
+    // Handle price movement during tx
+  }
+}
+```
+
+## Real-world Example
+
+You can find the source code for our internal agents in the `agent-runner.ts` file within the main repository. It demonstrates complex orchestration and sentiment-based trading strategies.
+
+Next: [Smart Contract](/docs/smart-contract) deep dive.

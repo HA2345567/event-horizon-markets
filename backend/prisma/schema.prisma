@@ -198,13 +198,39 @@ model Comment {
   wallet    String?  // Store wallet directly if no user profile
   author    String?  // Display name
   text      String
+  gifUrl    String?
   isAgent   Boolean  @default(false)
+  likesCount Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  likes     CommentLike[]
+  bookmarks CommentBookmark[]
 
   @@index([marketId])
   @@index([createdAt])
   @@map("comments")
+}
+
+model CommentLike {
+  id        String   @id @default(uuid())
+  commentId String
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  wallet    String
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, wallet])
+  @@map("comment_likes")
+}
+
+model CommentBookmark {
+  id        String   @id @default(uuid())
+  commentId String
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  wallet    String
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, wallet])
+  @@map("comment_bookmarks")
 }
 
 model Watchlist {
@@ -233,5 +259,46 @@ model Alert {
   updatedAt   DateTime @updatedAt
 
   @@map("alerts")
+}
+
+model Proposal {
+  id          String         @id @default(uuid())
+  title       String
+  description String
+  creator     String         // wallet address
+  status      String         @default("Active") // Active, Passed, Rejected, Executed
+  votesFor    Float          @default(0)
+  votesAgainst Float          @default(0)
+  endsAt      DateTime
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  votes       ProposalVote[]
+
+  @@map("proposals")
+}
+
+model ProposalVote {
+  id         String   @id @default(uuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  wallet     String
+  side       String   // FOR, AGAINST
+  weight     Float    // number of votes (usually stake amount)
+  createdAt  DateTime @default(now())
+
+  @@unique([proposalId, wallet])
+  @@map("proposal_votes")
+}
+
+model StakingPosition {
+  id        String   @id @default(uuid())
+  wallet    String   @unique
+  amount    Float    @default(0)
+  rewardSol Float    @default(0)
+  lockedUntil DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("staking_positions")
 }
 

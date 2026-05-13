@@ -11,9 +11,12 @@ const NAV = [
   { to: "/agents", label: "Agents" },
   { to: "/oracle", label: "Oracle" },
   { to: "/portfolio", label: "Portfolio" },
-  { to: "/governance", label: "DAO" },
   { to: "/developers", label: "Developers" },
+  { to: "/docs", label: "Docs" },
 ];
+
+
+
 
 export function Header() {
   const [open, setOpen] = useState(false);
@@ -54,14 +57,7 @@ export function Header() {
         </div>
 
         <div className="hidden items-center gap-2 md:flex">
-          {onLanding && (
-            <Link
-              to="/developers"
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
-            >
-              Docs
-            </Link>
-          )}
+
           <ConnectWalletButton className="heliora-wallet" />
           <Link
             to="/markets/create"

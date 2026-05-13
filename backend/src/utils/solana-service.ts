@@ -79,12 +79,14 @@ export class SolanaService {
         .initializeMarket(
           marketIdNum,
           marketData.question,
+          "", // resolutionCriteria
           resolutionSource,
           deadline,
           outcomesCount,
           strikePrice,
           pythFeed
         )
+
         .accounts({
           market: marketPda,
           authority: this.agentKeypair.publicKey,

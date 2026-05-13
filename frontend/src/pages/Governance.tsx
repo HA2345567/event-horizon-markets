@@ -19,43 +19,41 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 export default function Governance() {
   const [stakeAmount, setStakeAmount] = useState("");
+  const qc = useQueryClient();
   
   const stats = useQuery({
     queryKey: ["governance", "stats"],
-    queryFn: async () => ({
-      totalStaked: 12540880,
-      apy: 12.4,
-      myStake: 5000,
-      protocolFees: 45.2,
-      votingPower: 5000
-    }),
+    queryFn: () => api.govStats(),
+    refetchInterval: 10000,
   });
 
   const proposals = useQuery({
     queryKey: ["governance", "proposals"],
-    queryFn: async () => [
-      {
-        id: 1,
-        title: "HIP-1: Increase protocol fee to 0.25%",
-        status: "Active",
-        for: 85,
-        against: 15,
-        endsIn: "2 days",
-        creator: "0xHel...ora"
-      },
-      {
-        id: 2,
-        title: "HIP-2: Add 'AI Agents' as first-class market category",
-        status: "Passed",
-        for: 98,
-        against: 2,
-        endsIn: "Ended",
-        creator: "Heliora Foundation"
-      }
-    ],
+    queryFn: () => api.listProposals(),
+  });
+
+  const stakeMut = useMutation({
+    mutationFn: (amt: number) => api.stakeTokens(amt),
+    onSuccess: () => {
+      toast.success(`Successfully staked ${stakeAmount} HELIORA`);
+      setStakeAmount("");
+      qc.invalidateQueries({ queryKey: ["governance"] });
+    },
+    onError: () => toast.error("Staking failed. Please try again."),
+  });
+
+  const voteMut = useMutation({
+    mutationFn: ({ id, side }: { id: string; side: "FOR" | "AGAINST" }) => api.voteProposal(id, side),
+    onSuccess: () => {
+      toast.success("Vote recorded successfully");
+      qc.invalidateQueries({ queryKey: ["governance"] });
+    },
+    onError: () => toast.error("Voting failed. Ensure you have staked tokens."),
   });
 
   const data = stats.data;
@@ -149,8 +147,12 @@ export default function Governance() {
                 </div>
 
                 <div className="space-y-3">
-                  <Button className="w-full h-12 rounded-xl bg-foreground text-background hover:bg-foreground/90 font-bold transition-all active:scale-[0.98]">
-                    Stake $HELIORA
+                  <Button 
+                    onClick={() => stakeAmount && stakeMut.mutate(parseFloat(stakeAmount))}
+                    disabled={stakeMut.isPending || !stakeAmount}
+                    className="w-full h-12 rounded-xl bg-foreground text-background hover:bg-foreground/90 font-bold transition-all active:scale-[0.98]"
+                  >
+                    {stakeMut.isPending ? "Staking..." : "Stake $HELIORA"}
                   </Button>
                   <Button variant="ghost" className="w-full text-muted-foreground hover:text-foreground">
                     Unstake
@@ -224,10 +226,22 @@ export default function Governance() {
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline" className="h-8 border-success/30 bg-success/5 text-success hover:bg-success/10">
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => voteMut.mutate({ id: String(p.id), side: "FOR" })}
+                          disabled={voteMut.isPending}
+                          className="h-8 border-success/30 bg-success/5 text-success hover:bg-success/10"
+                        >
                           <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Vote For
                         </Button>
-                        <Button size="sm" variant="outline" className="h-8 border-destructive/30 bg-destructive/5 text-destructive hover:bg-destructive/10">
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => voteMut.mutate({ id: String(p.id), side: "AGAINST" })}
+                          disabled={voteMut.isPending}
+                          className="h-8 border-destructive/30 bg-destructive/5 text-destructive hover:bg-destructive/10"
+                        >
                           <XCircle className="mr-1.5 h-3.5 w-3.5" /> Against
                         </Button>
                       </div>

@@ -52,10 +52,25 @@ export function MarketCard({ market, compact = false }: MarketCardProps) {
         )}
       </div>
 
-      {/* Question / Title */}
-      <h3 className="text-base font-semibold text-white/95 leading-tight mb-6 line-clamp-2 min-h-[2.5rem] group-hover:text-white transition-colors">
-        {market.question}
-      </h3>
+      {/* Question / Title with Image */}
+      <div className="flex gap-3 mb-6">
+        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-white/10">
+          {market.imageUrl ? (
+            <img 
+              src={market.imageUrl} 
+              className="h-full w-full object-cover transition duration-500 group-hover:scale-110" 
+              alt={market.question} 
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-white/5">
+              <Globe className="h-6 w-6 text-white/20" />
+            </div>
+          )}
+        </div>
+        <h3 className="text-base font-semibold text-white/95 leading-tight line-clamp-2 min-h-[2.5rem] group-hover:text-white transition-colors">
+          {market.question}
+        </h3>
+      </div>
 
       {/* Outcome Rows (Polymarket Style) */}
       <div className="space-y-2.5 mb-6">

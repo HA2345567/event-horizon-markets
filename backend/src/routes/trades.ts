@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma';
 import { newId } from '../utils/helpers';
 import { solanaService } from '../utils/solana-service';
+import { broadcastSocialEvent } from './ws';
 
 const router = Router();
 
@@ -10,6 +11,7 @@ interface PlaceTradeBody {
   side: 'YES' | 'NO';
   shares: number;
   kind?: 'market' | 'limit';
+  price?: number; // Provided for limit orders
   isSell?: boolean;
   txSig?: string;
 }
@@ -40,7 +42,11 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     }
 
     const side = body.side.toUpperCase();
-    const price = side === 'YES' ? market.yesPrice : market.noPrice;
+    const currentMarketPrice = side === 'YES' ? market.yesPrice : market.noPrice;
+    
+    // Use provided price for limit orders, otherwise use market price
+    const price = (body.kind === 'limit' && body.price) ? body.price : currentMarketPrice;
+    
     const cost = parseFloat((body.shares * price).toFixed(2));
     const fee = parseFloat((cost * 0.01).toFixed(4));
 
@@ -77,6 +83,11 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       }
     }
 
+    const agent = await prisma.agent.findUnique({
+      where: { wallet: xWallet }
+    });
+    const isAgent = !!agent;
+
     // Create trade record
     const trade = await prisma.trade.create({
       data: {
@@ -84,7 +95,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         marketId: body.marketId,
         userId: user.id, // Use the actual user UUID
         wallet: xWallet,
-        isAgent: false,
+        isAgent,
         side,
         kind: body.kind || 'market',
         shares: body.shares,
@@ -208,6 +219,17 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     }
 
     res.status(201).json({ trade });
+
+    // Broadcast trade event for real-time UI updates
+    broadcastSocialEvent(body.marketId, {
+      type: 'trade',
+      trade: {
+        ...trade,
+        handle: user.handle,
+      },
+      ts: Date.now(),
+    });
+
     return;
   } catch (error) {
     console.error(error);

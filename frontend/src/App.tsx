@@ -36,9 +36,12 @@ const persister = createSyncStoragePersister({
 });
 
 persistQueryClient({
-  queryClient,
+  queryClient: queryClient as any,
   persister,
 });
+
+
+import DocsDetail from "./pages/DocsDetail.tsx";
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -57,10 +60,13 @@ const App = () => (
             <Route path="/agents/:id" element={<AgentDetail />} />
             <Route path="/oracle" element={<Oracle />} />
             <Route path="/developers" element={<Developers />} />
-            <Route path="/token" element={<Token />} />
+            <Route path="/docs" element={<DocsDetail />} />
+            <Route path="/docs/:slug" element={<DocsDetail />} />
+            <Route path="/privacy" element={<DocsDetail />} />
+            <Route path="/terms" element={<DocsDetail />} />
+
             <Route path="/live" element={<Live />} />
             <Route path="/live/:id" element={<MarketDetail />} />
-            <Route path="/governance" element={<Governance />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
@@ -68,5 +74,6 @@ const App = () => (
     </SolanaProvider>
   </QueryClientProvider>
 );
+
 
 export default App;

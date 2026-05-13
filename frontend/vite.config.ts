@@ -3,6 +3,13 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
+import mdx from "@mdx-js/rollup";
+import remarkGfm from "remark-gfm";
+import remarkFrontmatter from "remark-frontmatter";
+import remarkMdxFrontmatter from "remark-mdx-frontmatter";
+import rehypeHighlight from "rehype-highlight";
+import rehypeSlug from "rehype-slug";
+import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -17,7 +24,17 @@ export default defineConfig(({ mode }) => {
       ),
     },
     plugins: [
+      mdx({
+        remarkPlugins: [remarkGfm, remarkFrontmatter, remarkMdxFrontmatter],
+        rehypePlugins: [
+          rehypeHighlight,
+          rehypeSlug,
+          [rehypeAutolinkHeadings, { behavior: "append" }],
+        ],
+      }),
       react(),
+
+
       nodePolyfills({
         include: ["buffer", "crypto", "stream", "util"],
         globals: {
@@ -28,6 +45,7 @@ export default defineConfig(({ mode }) => {
       }),
       mode === "development" && componentTagger(),
     ].filter(Boolean),
+
     server: {
       host: "::",
       port: 8080,

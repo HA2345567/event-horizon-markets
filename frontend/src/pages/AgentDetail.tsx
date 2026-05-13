@@ -8,7 +8,7 @@ import {
   Activity, ArrowUpRight, History, Wallet,
   Info, AlertCircle, CheckCircle2, ChevronRight
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getAvatar } from "@/lib/utils";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { useHelioraWallet } from "@/components/wallet/useHelioraWallet";
@@ -137,8 +137,8 @@ export default function AgentDetail() {
               {/* Profile Header */}
               <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-border">
                 <div className="flex items-center gap-5">
-                  <div className="flex h-20 w-20 items-center justify-center rounded-2xl border-2 border-border bg-background shadow-ring">
-                    <Icon className="h-10 w-10 text-foreground" />
+                  <div className="flex h-20 w-20 items-center justify-center rounded-2xl border-2 border-border bg-background shadow-ring overflow-hidden">
+                    <img src={getAvatar(agent.id, true)!} className="h-full w-full object-cover scale-110" alt="" />
                   </div>
                   <div>
                     <div className="flex items-center gap-3">

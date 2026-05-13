@@ -106,6 +106,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
         open_interest: m.liquidity * 10,
         close_time: m.endsAt.toISOString(),
         event_ticker: ticker.split('-')[0] ?? ticker,
+        image_url: m.imageUrl,
         // Internal ID so frontend can navigate to detail
         _id: m.id,
       };
@@ -211,6 +212,7 @@ router.get('/:ticker', async (req: Request, res: Response): Promise<void> => {
         notional_value: market.volume * 0.5,
         close_time: market.endsAt.toISOString(),
         event_ticker: ticker.split('-')[0] ?? ticker,
+        image_url: market.imageUrl,
         _id: market.id,
       },
       orderbook: {

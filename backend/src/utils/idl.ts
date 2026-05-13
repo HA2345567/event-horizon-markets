@@ -1,4 +1,4 @@
-export const IDL: any = {
+export const IDL = {
   version: "0.7.0",
   name: "heliora_prediction_market",
   address: "By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT",
@@ -158,17 +158,18 @@ export const IDL: any = {
     }
   ],
   accounts: [
-    { name: "market", discriminator: [219, 190, 213, 55, 0, 227, 198, 154] },
+    { name: "Market", discriminator: [219, 190, 213, 55, 0, 227, 198, 154] },
     { name: "oracleRegistry", discriminator: [94, 153, 19, 250, 94, 0, 12, 172] },
     { name: "agentTemplate", discriminator: [144, 215, 86, 173, 92, 116, 55, 22] },
     { name: "agentAccount", discriminator: [241, 119, 69, 140, 233, 9, 112, 50] }
   ],
   types: [
     {
-      name: "market",
+      name: "Market",
       type: {
         kind: "struct",
         fields: [
+
           { name: "authority", type: "pubkey" },
           { name: "marketId", type: "u32" },
           { name: "createdAt", type: "i64" },
@@ -262,4 +263,4 @@ export const IDL: any = {
       }
     }
   ]
-};
+} as const;

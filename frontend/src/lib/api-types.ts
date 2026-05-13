@@ -35,12 +35,14 @@ export interface ApiMarket {
   liquidity: number;
   volume: number;
   participants: number;
+  totalTrades?: number;
   isLive: boolean;
   creator: { wallet: string; handle?: string | null };
   createdAt: string;
   imageUrl?: string | null;
   oracleResolution?: ApiOracleResolution | null;
   outcome_mints: string[];
+  collateralMint?: string | null;
   winning_outcome_index?: number | null;
 }
 
@@ -68,7 +70,11 @@ export interface ApiComment {
   userId?: string | null;
   wallet?: string | null;
   text: string;
+  gifUrl?: string | null;
   isAgent: boolean;
+  likesCount: number;
+  isLiked?: boolean;
+  isBookmarked?: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -156,4 +156,16 @@ export function initializeWebSocket(wss: WebSocketServer) {
   });
 }
 
+export function broadcastSocialEvent(marketId: string, event: any) {
+  const targets = activeConnections.get(marketId);
+  if (targets) {
+    const message = JSON.stringify(event);
+    for (const client of targets) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    }
+  }
+}
+
 export { activeConnections };

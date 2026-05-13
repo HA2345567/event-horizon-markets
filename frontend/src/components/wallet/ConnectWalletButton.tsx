@@ -6,20 +6,11 @@ import { toast } from "sonner";
 import { apiBaseUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+import { useHelioraWallet } from "./useHelioraWallet";
+
 export function ConnectWalletButton({ className }: { className?: string }) {
-  const { connected, publicKey, disconnect } = useWallet();
+  const { connected, address, disconnect } = useHelioraWallet();
   const { setVisible } = useWalletModal();
-  const address = publicKey?.toBase58();
-
-  // Sync address to Heliora localStorage
-  useEffect(() => {
-    if (address) {
-      localStorage.setItem("heliora.wallet", address);
-    } else {
-      localStorage.removeItem("heliora.wallet");
-    }
-  }, [address]);
-
 
   if (!connected) {
     return (

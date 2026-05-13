@@ -60,6 +60,19 @@ export const api = {
       buyYes: { price: number; size: number }[];
       sellYes: { price: number; size: number }[];
     }>(`/api/markets/${id}/orderbook`),
+  getHolders: (id: string) =>
+    req<{
+      holders: {
+        id: string;
+        wallet: string;
+        handle: string | null;
+        isAgent: boolean;
+        yesShares: number;
+        noShares: number;
+        totalShares: number;
+        avgPrice: number;
+      }[];
+    }>(`/api/markets/${id}/holders`),
   createMarket: (body: {
     question: string;
     description?: string;
@@ -72,7 +85,7 @@ export const api = {
   }) => req<{ market: ApiMarket }>("/api/markets", { method: "POST", body: JSON.stringify(body) }),
   getComments: (marketId: string) =>
     req<{ comments: ApiComment[] }>(`/api/markets/${marketId}/comments`),
-  postComment: (marketId: string, body: { text: string; wallet?: string; isAgent?: boolean }) =>
+  postComment: (marketId: string, body: { text: string; wallet?: string; isAgent?: boolean; gifUrl?: string }) =>
     req<{ comment: ApiComment }>(`/api/markets/${marketId}/comments`, {
       method: "POST",
       body: JSON.stringify(body),
@@ -84,6 +97,7 @@ export const api = {
     side: Side;
     kind?: TradeKind;
     shares: number;
+    price?: number;
     isSell?: boolean;
     txSig?: string;
   }) => req<{ trade: ApiTrade }>("/api/trades", { method: "POST", body: JSON.stringify(body) }),
@@ -189,11 +203,25 @@ export const api = {
     req<{ alert: unknown }>("/api/social/alerts", { method: "POST", body: JSON.stringify(body) }),
   getAlerts: () => req<{ alerts: unknown[] }>("/api/social/alerts"),
   deleteAlert: (id: string) => req<{ success: boolean }>(`/api/social/alerts/${id}`, { method: "DELETE" }),
+  likeComment: (id: string) => req<{ status: "liked" | "unliked"; commentId: string }>(`/api/social/comments/${id}/like`, { method: "POST" }),
+  bookmarkComment: (id: string) => req<{ status: "bookmarked" | "unbookmarked"; commentId: string }>(`/api/social/comments/${id}/bookmark`, { method: "POST" }),
   redeemMarket: (marketId: string, txSig: string) =>
     req<{ success: boolean }>("/api/trades/redeem", {
       method: "POST",
       body: JSON.stringify({ marketId, txSig }),
     }),
+
+  // Governance
+  govStats: () => req<{ totalStaked: number; apy: number; myStake: number; rewardSol: number; votingPower: number }>("/api/governance/stats"),
+  listProposals: () => req<{ proposals: any[] }>("/api/governance/proposals"),
+  stakeTokens: (amount: number) => req<{ success: boolean }>("/api/governance/stake", {
+    method: "POST",
+    body: JSON.stringify({ amount }),
+  }),
+  voteProposal: (proposalId: string, side: "FOR" | "AGAINST") => req<{ success: boolean }>(`/api/governance/vote/${proposalId}`, {
+    method: "POST",
+    body: JSON.stringify({ side }),
+  }),
 };
 
 // Display helpers (kept here to avoid duplication across pages)

@@ -28,10 +28,15 @@ if (-not $DATABASE_URL) {
 $VITE_API_URL = "https://heliora-backend-40377961468.asia-east1.run.app"
 $VITE_PRIVY_APP_ID = "cmooj9sxq009x0djo8i0uld15"
 
+$SUBSTITUTIONS = "_DATABASE_URL=$DATABASE_URL,_GEMINI_API_KEY=$GEMINI_API_KEY,_GEMINI_MODEL=gemini-3-flash-preview,_VITE_API_URL=$VITE_API_URL,_VITE_PRIVY_APP_ID=$VITE_PRIVY_APP_ID"
+
 # Submit the build
 Write-Host "Submitting Cloud Build..." -ForegroundColor Yellow
 gcloud builds submit --config cloudbuild.yaml `
-    --substitutions=_DATABASE_URL="$DATABASE_URL",_GEMINI_API_KEY="$GEMINI_API_KEY",_GEMINI_MODEL="gemini-3-flash-preview",_VITE_API_URL="$VITE_API_URL",_VITE_PRIVY_APP_ID="$VITE_PRIVY_APP_ID" .
+    --service-account="projects/oneclaw-486705/serviceAccounts/vertex-express@oneclaw-486705.iam.gserviceaccount.com" `
+    --substitutions="$SUBSTITUTIONS" .
+
+
 
 Write-Host "✅ Deployment Triggered! Check the GCP Console for progress." -ForegroundColor Green
 Write-Host "Backend: https://heliora-backend-40377961468.asia-east1.run.app"

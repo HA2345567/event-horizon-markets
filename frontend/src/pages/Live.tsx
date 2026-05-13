@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { PageShell } from "@/components/layout/PageShell";
-import { Activity, ArrowDown, ArrowRight, ArrowUp, Radio, Search, ShieldCheck, Zap } from "lucide-react";
+import { Activity, ArrowDown, ArrowRight, ArrowUp, Globe, LayoutGrid, List as ListIcon, Radio, Search, ShieldCheck, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { KalshiMarketLive } from "@/lib/api-types";
 
@@ -28,6 +28,7 @@ export default function Live() {
   const [cat, setCat] = useState<(typeof CATS)[number]>("All");
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(1000);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   const { data, isLoading, isError, error, dataUpdatedAt, refetch, isFetching } = useQuery({
     queryKey: ["live", "markets", limit],
@@ -103,6 +104,20 @@ export default function Live() {
               </button>
             ))}
           </div>
+          <div className="flex items-center gap-1 p-1 bg-surface border border-border rounded-lg mr-2">
+            <button 
+              onClick={() => setViewMode("grid")}
+              className={cn("px-2 py-1 rounded-md transition", viewMode === "grid" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button 
+              onClick={() => setViewMode("list")}
+              className={cn("px-2 py-1 rounded-md transition", viewMode === "list" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+            >
+              <ListIcon className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <button
             onClick={() => refetch()}
             disabled={isFetching}
@@ -132,9 +147,59 @@ export default function Live() {
           </div>
         ) : (
           <>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filtered.map((m) => <KalshiCard key={m.ticker} m={m} />)}
-            </div>
+            {viewMode === "grid" ? (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {filtered.map((m) => <KalshiCard key={m.ticker} m={m} />)}
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-ring">
+                <div className="grid grid-cols-12 border-b border-border bg-background px-5 py-3 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <div className="col-span-5">Market</div>
+                  <div className="col-span-1 text-center">Ticker</div>
+                  <div className="col-span-2 text-right">Price (Yes)</div>
+                  <div className="col-span-2 text-right">24h Vol</div>
+                  <div className="col-span-2 text-right">Expires</div>
+                </div>
+                <div className="divide-y divide-border/50">
+                  {filtered.map((m) => (
+                    <Link to={`/live/${m.ticker}`} key={m.ticker} className="grid grid-cols-12 items-center px-5 py-4 transition hover:bg-surface-hover">
+                      <div className="col-span-5 pr-4 flex items-center gap-3">
+                        <div className="h-8 w-8 shrink-0 rounded-md ring-1 ring-white/10 bg-white/5 flex items-center justify-center overflow-hidden">
+                          {(m as any).image_url || (m as any).imageUrl ? (
+                            <img
+                              src={(m as any).image_url || (m as any).imageUrl}
+                              className="h-full w-full object-cover"
+                              alt=""
+                            />
+                          ) : (
+                            <Globe className="h-4 w-4 text-white/20" />
+                          )}
+                        </div>
+                        <div>
+                          <div className="line-clamp-1 text-sm font-medium">{m.title}</div>
+                          <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                            <span className="badge-pill !bg-surface !border-border/40 text-[9px]">{m.category}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="col-span-1 text-center font-mono text-[11px] text-muted-foreground">
+                        {m.ticker.split('-').slice(-1)[0]}
+                      </div>
+                      <div className="col-span-2 text-right">
+                        <div className="font-mono text-sm font-semibold">{(m.yes_prob * 100).toFixed(1)}%</div>
+                        <div className="text-[10px] text-muted-foreground">{(1 / m.yes_prob).toFixed(2)}x</div>
+                      </div>
+                      <div className="col-span-2 text-right font-mono text-sm">
+                        {fmtUsd(m.volume_24h / 100)}
+                      </div>
+                      <div className="col-span-2 text-right font-mono text-[11px] text-muted-foreground">
+                        {timeUntil(m.close_time)}
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
             
             {data?.pagination?.hasMore && (
               <div className="mt-12 flex justify-center">
@@ -188,10 +253,23 @@ function KalshiCard({ m }: { m: KalshiMarketLive }) {
           </div>
         </div>
 
-        {/* Title */}
-      <h3 className="text-[17px] font-bold text-white leading-snug mb-8 line-clamp-2 min-h-[3rem]">
-          {m.title}
-        </h3>
+        {/* Title with Image */}
+        <div className="flex gap-4 mb-8">
+          <div className="h-12 w-12 shrink-0 rounded-xl ring-1 ring-white/10 bg-white/5 flex items-center justify-center overflow-hidden">
+            {(m as any).image_url || (m as any).imageUrl ? (
+              <img
+                src={(m as any).image_url || (m as any).imageUrl}
+                className="h-full w-full object-cover"
+                alt=""
+              />
+            ) : (
+              <Globe className="h-6 w-6 text-white/20" />
+            )}
+          </div>
+          <h3 className="text-[17px] font-bold text-white leading-snug line-clamp-2 min-h-[3rem]">
+            {m.title}
+          </h3>
+        </div>
 
         {/* Outcomes Grid */}
       <div className="flex flex-col gap-6 mb-8">

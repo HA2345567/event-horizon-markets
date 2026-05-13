@@ -250,8 +250,167 @@ pub mod heliora_prediction_market {
         Ok(())
     }
 
-    pub fn add_liquidity(ctx: Context<AddLiquidity>, market_id: u32, amount: u64) -> Result<()> { Ok(()) }
-    pub fn swap(ctx: Context<Swap>, market_id: u32, outcome_index: u8, amount_in: u64) -> Result<()> { Ok(()) }
-    pub fn set_winner(ctx: Context<SetWinner>, market_id: u32, winning_index: u8) -> Result<()> { Ok(()) }
-    pub fn claim_rewards(ctx: Context<ClaimRewards>, market_id: u32) -> Result<()> { Ok(()) }
+    pub fn add_liquidity(ctx: Context<AddLiquidity>, _market_id: u32, amount: u64) -> Result<()> {
+        let market = &mut ctx.accounts.market;
+        
+        // 1. Transfer Collateral from User to Market Vault
+        let cpi_accounts = anchor_spl::token::Transfer {
+            from: ctx.accounts.user_collateral.to_account_info(),
+            to: ctx.accounts.collateral_vault.to_account_info(),
+            authority: ctx.accounts.user.to_account_info(),
+        };
+        anchor_spl::token::transfer(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts),
+            amount
+        )?;
+
+        // 2. Mint LP tokens to User
+        // For simplicity, 1 collateral = 1 LP token for the first provision
+        let lp_amount = if ctx.accounts.lp_mint.supply == 0 {
+            amount
+        } else {
+            (amount as u128 * ctx.accounts.lp_mint.supply as u128 / ctx.accounts.collateral_vault.amount as u128) as u64
+        };
+
+        let market_id_bytes = market.market_id.to_le_bytes();
+        let seeds = &[
+            b"market",
+            market_id_bytes.as_ref(),
+            &[market.bump],
+        ];
+        let signer = &[&seeds[..]];
+
+        let cpi_mint_lp = anchor_spl::token::MintTo {
+            mint: ctx.accounts.lp_mint.to_account_info(),
+            to: ctx.accounts.user_lp.to_account_info(),
+            authority: market.to_account_info(),
+        };
+        anchor_spl::token::mint_to(
+            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi_mint_lp, signer),
+            lp_amount
+        )?;
+
+        market.total_collateral_locked += amount;
+        
+        msg!("Liquidity added: {} Collateral -> {} LP tokens", amount, lp_amount);
+        Ok(())
+    }
+    pub fn swap(ctx: Context<Swap>, _market_id: u32, outcome_index: u8, amount_in: u64) -> Result<()> {
+        let market = &mut ctx.accounts.market;
+        let now = Clock::get()?.unix_timestamp;
+
+        require!(!market.is_settled, PredictionMarketError::MarketAlreadySettled);
+        require!(now < market.settlement_deadline, PredictionMarketError::MarketExpired);
+
+        // 1. Calculate Fee
+        let fee_amount = (amount_in as u128 * 30 / 10000) as u64; // 30 bps fee
+        let net_amount_in = amount_in - fee_amount;
+
+        // 2. AMM Math (Constant Product: x * y = k)
+        // x = collateral_reserve, y = outcome_reserve
+        let collateral_reserve = ctx.accounts.collateral_vault.amount as u128;
+        let outcome_reserve = ctx.accounts.outcome_vault.amount as u128;
+
+        require!(outcome_reserve > 0, PredictionMarketError::InsufficientLiquidity);
+
+        // Calculate amount out: dy = y * dx / (x + dx)
+        let amount_out = (outcome_reserve * net_amount_in as u128) / (collateral_reserve + net_amount_in as u128);
+        require!(amount_out > 0, PredictionMarketError::InsufficientLiquidity);
+
+        // 3. Transfer Collateral from User to Vault
+        let cpi_accounts_in = anchor_spl::token::Transfer {
+            from: ctx.accounts.user_collateral.to_account_info(),
+            to: ctx.accounts.collateral_vault.to_account_info(),
+            authority: ctx.accounts.user.to_account_info(),
+        };
+        anchor_spl::token::transfer(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts_in),
+            amount_in
+        )?;
+
+        // 4. Transfer Outcome Tokens from Vault to User
+        let market_id_bytes = market.market_id.to_le_bytes();
+        let seeds = &[
+            b"market",
+            market_id_bytes.as_ref(),
+            &[market.bump],
+        ];
+        let signer = &[&seeds[..]];
+
+        let cpi_accounts_out = anchor_spl::token::Transfer {
+            from: ctx.accounts.outcome_vault.to_account_info(),
+            to: ctx.accounts.user_outcome.to_account_info(),
+            authority: market.to_account_info(),
+        };
+        anchor_spl::token::transfer(
+            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi_accounts_out, signer),
+            amount_out as u64
+        )?;
+
+        msg!("Swap executed: {} Collateral -> {} Outcome[{}]", amount_in, amount_out, outcome_index);
+
+        Ok(())
+    }
+    pub fn set_winner(ctx: Context<SetWinner>, _market_id: u32, winning_index: u8) -> Result<()> {
+        let market = &mut ctx.accounts.market;
+        let now = Clock::get()?.unix_timestamp;
+
+        require!(ctx.accounts.authority.key() == market.authority, PredictionMarketError::UnauthorizedResolution);
+        require!(!market.is_settled, PredictionMarketError::MarketAlreadySettled);
+        require!(winning_index < market.outcomes_count, PredictionMarketError::OutcomeIndexOutOfBounds);
+        
+        market.is_settled = true;
+        market.winning_outcome_index = Some(winning_index);
+        market.dispute_deadline = now + 172800; // 48h dispute window
+        
+        msg!("Market {} resolved to winner: {}", market.market_id, winning_index);
+        Ok(())
+    }
+    pub fn claim_rewards(ctx: Context<ClaimRewards>, _market_id: u32) -> Result<()> {
+        let market = &ctx.accounts.market;
+        let user = &ctx.accounts.user;
+        
+        require!(market.is_settled, PredictionMarketError::MarketNotSettled);
+        
+        let winning_index = market.winning_outcome_index.ok_or(PredictionMarketError::WinningOutcomeNotSet)?;
+        let winning_mint = market.outcome_mints[winning_index as usize];
+        
+        require!(ctx.accounts.winning_outcome_mint.key() == winning_mint, PredictionMarketError::InvalidWinningMint);
+        
+        let user_shares = ctx.accounts.user_winning_outcome_ata.amount;
+        require!(user_shares > 0, PredictionMarketError::NoWinningShares);
+
+        // 1. Burn the winning outcome tokens from user
+        let cpi_burn = anchor_spl::token::Burn {
+            mint: ctx.accounts.winning_outcome_mint.to_account_info(),
+            from: ctx.accounts.user_winning_outcome_ata.to_account_info(),
+            authority: user.to_account_info(),
+        };
+        anchor_spl::token::burn(
+            CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_burn),
+            user_shares
+        )?;
+
+        // 2. Transfer Collateral to User (1 winning share = 1 USDC/Collateral)
+        let market_id_bytes = market.market_id.to_le_bytes();
+        let seeds = &[
+            b"market",
+            market_id_bytes.as_ref(),
+            &[market.bump],
+        ];
+        let signer = &[&seeds[..]];
+
+        let cpi_transfer = anchor_spl::token::Transfer {
+            from: ctx.accounts.collateral_vault.to_account_info(),
+            to: ctx.accounts.user_collateral.to_account_info(),
+            authority: ctx.accounts.market.to_account_info(),
+        };
+        anchor_spl::token::transfer(
+            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi_transfer, signer),
+            user_shares
+        )?;
+
+        msg!("Rewards claimed: {} collateral distributed to user {}", user_shares, user.key());
+        Ok(())
+    }
 }

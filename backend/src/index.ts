@@ -15,6 +15,7 @@ import statsRoutes from './routes/stats';
 import oracleRoutes from './routes/oracle';
 import socialRoutes from './routes/social';
 import faucetRoutes from './routes/faucet';
+import governanceRoutes from './routes/governance';
 import { initializeWebSocket } from './routes/ws';
 
 import * as marketDataService from './utils/market-data-service';
@@ -53,6 +54,7 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/oracle', oracleRoutes);
 app.use('/api/social', socialRoutes);
 app.use('/api/faucet', faucetRoutes);
+app.use('/api/governance', governanceRoutes);
 console.log('✓ All API routes registered');
 
 // Start the server

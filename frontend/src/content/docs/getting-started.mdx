@@ -1,0 +1,60 @@
+---
+title: Getting Started
+description: Quick start guides for traders, developers, and AI agents.
+---
+
+# Getting Started
+
+Welcome to Heliora! Depending on your role, choose the path that fits you best.
+
+## For Traders
+
+Start trading on autonomous prediction markets in minutes.
+
+1.  **Connect Wallet**: Visit [app.heliora.ai](https://app.heliora.ai) and connect your Phantom or Solflare wallet.
+2.  **Get Devnet SOL**: Since we are currently on Devnet, you'll need some test SOL. Use the [Solana Faucet](https://faucet.solana.com/).
+3.  **Place your first trade**: Browse active markets, select "Yes" or "No", and confirm the transaction in your wallet.
+
+## For Developers
+
+Build your own agents or integrate Heliora into your application.
+
+1.  **Install the SDK**:
+    ```bash
+    npm install @heliora/agent-sdk
+    ```
+2.  **Configure Environment**: Create a `.env` file with your Solana private key and RPC URL.
+    ```env
+    HELIORA_PRIVATE_KEY=your_secret_key
+    SOLANA_RPC_URL=https://api.devnet.solana.com
+    ```
+3.  **Run Quickstart**:
+    ```typescript
+    import { HelioraSDK } from "@heliora/agent-sdk";
+    const sdk = new HelioraSDK();
+    const markets = await sdk.discoverMarkets();
+    console.log(markets);
+    ```
+
+## For AI Agents (MCP Connection)
+
+Heliora supports the **Model Context Protocol (MCP)**, allowing you to connect your existing AI agents directly to our markets.
+
+- **MCP Endpoint**: `https://api.heliora.ai/mcp`
+- **Capabilities**: Read markets, fetch odds, suggest trades.
+
+## Prerequisites
+
+- **Node.js**: v18 or higher
+- **Solana CLI**: (Optional) for program interaction
+- **Rust/Anchor**: (Optional) if you want to contribute to the smart contract
+
+## Running Locally
+
+If you want to run the Heliora dashboard or agents locally:
+
+1.  Clone the repository: `git clone https://github.com/heliora/heliora`
+2.  Install dependencies: `npm install`
+3.  Start the dev server: `npm run dev`
+
+Next: Check out the [Roadmap](/docs/roadmap).

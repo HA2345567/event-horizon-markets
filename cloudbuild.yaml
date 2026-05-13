@@ -23,8 +23,11 @@ steps:
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
+      - '--service-account'
+      - 'vertex-express@oneclaw-486705.iam.gserviceaccount.com'
       - '--set-env-vars'
       - 'DATABASE_URL=$_DATABASE_URL,GEMINI_API_KEY=$_GEMINI_API_KEY,GEMINI_MODEL=$_GEMINI_MODEL,NODE_ENV=production,CORS_ORIGIN=*'
+
 
   # 3. Build Frontend (with the backend URL)
   - name: 'gcr.io/cloud-builders/docker'
@@ -56,6 +59,9 @@ steps:
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
+      - '--service-account'
+      - 'vertex-express@oneclaw-486705.iam.gserviceaccount.com'
+
 
 images:
   - 'gcr.io/$PROJECT_ID/heliora-backend'

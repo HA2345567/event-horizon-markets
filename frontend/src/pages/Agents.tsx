@@ -3,7 +3,7 @@ import { PageShell } from "@/components/layout/PageShell";
 import { api, formatUsd } from "@/lib/api";
 import type { ApiAgent } from "@/lib/api-types";
 import { Bot, Brain, Cpu, Network, Search, Sparkles, TrendingUp, Zap } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getAvatar } from "@/lib/utils";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
@@ -149,8 +149,8 @@ function AgentCard({ a }: { a: ApiAgent }) {
     <div className="group flex flex-col rounded-2xl border border-border bg-surface p-6 shadow-ring transition hover:bg-surface-elevated">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-background">
-            <Icon className="h-5 w-5" />
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-background overflow-hidden">
+            <img src={getAvatar(a.id, true)!} className="h-full w-full object-cover scale-110" alt="" />
           </div>
           <div>
             <div className="font-display text-xl">{a.name}</div>

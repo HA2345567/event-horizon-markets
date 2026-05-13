@@ -153,4 +153,105 @@ router.delete('/alerts/:id', async (req: Request, res: Response): Promise<void> 
   }
 });
 
+// ─── Comments Social ────────────────────────────────────────────────────────
+// Toggle like on a comment
+router.post('/comments/:id/like', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const wallet = req.headers['x-wallet'] as string;
+
+    if (!wallet) {
+      res.status(401).json({ error: 'Wallet not connected' });
+      return;
+    }
+
+    const existing = await prisma.commentLike.findUnique({
+      where: {
+        commentId_wallet: {
+          commentId: id,
+          wallet
+        }
+      }
+    });
+
+      const comment = await prisma.comment.findUnique({ where: { id }, select: { marketId: true } });
+      const marketId = comment?.marketId;
+
+      if (existing) {
+        await prisma.$transaction([
+          prisma.commentLike.delete({ where: { id: existing.id } }),
+          prisma.comment.update({
+            where: { id },
+            data: { likesCount: { decrement: 1 } }
+          })
+        ]);
+        if (marketId) {
+          const { broadcastSocialEvent } = require('./ws');
+          broadcastSocialEvent(marketId, { type: 'comment_update', commentId: id, action: 'unlike' });
+        }
+        res.json({ status: 'unliked', commentId: id });
+      } else {
+        await prisma.$transaction([
+          prisma.commentLike.create({
+            data: {
+              id: newId(),
+              commentId: id,
+              wallet
+            }
+          }),
+          prisma.comment.update({
+            where: { id },
+            data: { likesCount: { increment: 1 } }
+          })
+        ]);
+        if (marketId) {
+          const { broadcastSocialEvent } = require('./ws');
+          broadcastSocialEvent(marketId, { type: 'comment_update', commentId: id, action: 'like' });
+        }
+        res.json({ status: 'liked', commentId: id });
+      }
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to like comment' });
+  }
+});
+
+// Toggle bookmark on a comment
+router.post('/comments/:id/bookmark', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const wallet = req.headers['x-wallet'] as string;
+
+    if (!wallet) {
+      res.status(401).json({ error: 'Wallet not connected' });
+      return;
+    }
+
+    const existing = await prisma.commentBookmark.findUnique({
+      where: {
+        commentId_wallet: {
+          commentId: id,
+          wallet
+        }
+      }
+    });
+
+    if (existing) {
+      await prisma.commentBookmark.delete({ where: { id: existing.id } });
+      res.json({ status: 'unbookmarked', commentId: id });
+    } else {
+      await prisma.commentBookmark.create({
+        data: {
+          id: newId(),
+          commentId: id,
+          wallet
+        }
+      });
+      res.json({ status: 'bookmarked', commentId: id });
+    }
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to bookmark comment' });
+  }
+});
+
 export default router;

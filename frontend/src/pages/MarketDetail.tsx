@@ -6,7 +6,7 @@ import { useHelioraWallet } from "@/components/wallet/useHelioraWallet";
 import { PageShell } from "@/components/layout/PageShell";
 import { api, formatUsd, timeUntil } from "@/lib/api";
 import { useMarketSocket } from "@/hooks/useMarketSocket";
-import type { ApiMarket, ApiPricePoint, ApiTrade } from "@/lib/api-types";
+import type { ApiMarket, ApiPricePoint, ApiTrade, ApiComment } from "@/lib/api-types";
 import * as anchor from "@coral-xyz/anchor";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
@@ -27,6 +27,11 @@ import {
   Cell,
 } from "recharts";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Activity,
   ArrowLeft,
   ArrowUpRight,
@@ -43,6 +48,7 @@ import {
   ExternalLink,
   Eye,
   Flame,
+  Globe,
   Info,
   LineChart as LineChartIcon,
   Loader2,
@@ -58,12 +64,14 @@ import {
   TrendingDown,
   TrendingUp,
   Users,
+  User,
   Wallet,
   Wifi,
   Zap,
   DollarSign,
+  X,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getAvatar } from "@/lib/utils";
 
 type Side = "YES" | "NO";
 type OrderType = "Market" | "Limit" | "Stop";
@@ -112,7 +120,8 @@ function filterPointsByRange(points: ApiPricePoint[], range: Range): ApiPricePoi
   const oldestTs = new Date(filtered[0].ts).getTime();
   if (oldestTs > cutoff + span * 0.1) {
     const backfillCount = 40;
-    const startPrice = 0.5 + (Math.random() - 0.5) * 0.2;
+    // Deterministic start price so the left side of the chart stops jumping!
+    const startPrice = 0.5 + (((oldestTs % 1337) / 1337) - 0.5) * 0.2;
     const endPrice = filtered[0].yesPrice;
     const backfill = generateSyntheticPoints(cutoff, oldestTs - (span / 100), startPrice, backfillCount, endPrice);
     return [...backfill, ...filtered];
@@ -128,15 +137,24 @@ function generateSyntheticPoints(startTs: number, endTs: number, startPrice: num
   let currentPrice = startPrice;
   let momentum = 0;
 
+  // Deterministic seeded random to prevent chart fluctuation on every tick
+  let seed = 1337;
+  const random = () => {
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return (seed >>> 0) / 4294967296;
+  };
+
   for (let i = 0; i < count; i++) {
     const ts = new Date(startTs + i * step).toISOString();
-    
+
     // Realistic random walk with momentum and mean reversion
     const drift = targetEndPrice !== undefined ? (targetEndPrice - currentPrice) / (count - i) : 0;
-    momentum = momentum * 0.8 + (Math.random() - 0.5) * 0.02 + drift * 0.2;
+    momentum = momentum * 0.8 + (random() - 0.5) * 0.02 + drift * 0.2;
     currentPrice += momentum;
     currentPrice = Math.max(0.05, Math.min(0.95, currentPrice));
-    
+
     points.push({ ts, yesPrice: currentPrice, noPrice: 1 - currentPrice });
   }
   return points;
@@ -151,7 +169,7 @@ function formatChartLabel(ts: string, range: Range): string {
 
 function HeaderAction({ icon: Icon, label, active, onClick }: { icon: any; label: string; active?: boolean; onClick?: () => void }) {
   return (
-    <button 
+    <button
       onClick={onClick}
       className={cn(
         "flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/5",
@@ -164,6 +182,7 @@ function HeaderAction({ icon: Icon, label, active, onClick }: { icon: any; label
   );
 }
 
+
 // ─── Main Page ────────────────────────────────────────────────────────────
 
 export default function MarketDetail() {
@@ -175,9 +194,16 @@ export default function MarketDetail() {
     enabled: !!id,
     refetchInterval: 10000,
   });
-  
+
   const { balance, isLoadingBalance } = useHelioraWallet();
-  const { livePrice: socketPrice, orderbook: socketOrderbook, status: wsStatus } = useMarketSocket(id);
+  const { livePrice: socketPrice, orderbook: socketOrderbook, status: wsStatus, lastSocialEvent } = useMarketSocket(id);
+
+  useEffect(() => {
+    if (lastSocialEvent?.type === 'trade') {
+      queryClient.invalidateQueries({ queryKey: ["market", id] });
+      queryClient.invalidateQueries({ queryKey: ["holders", id] });
+    }
+  }, [lastSocialEvent, id, queryClient]);
   const { connection } = useConnection();
   const { publicKey, sendTransaction, signTransaction, connected } = useWallet();
 
@@ -234,25 +260,67 @@ export default function MarketDetail() {
         publicKey, signTransaction: signTransaction as any, signAllTransactions: async (t) => t
       }, { preflightCommitment: "confirmed" });
 
-      const program = new anchor.Program(IDL, provider);
-      
+      const program = new anchor.Program(IDL as any, provider) as any;
+
+
       // Categorical index: 0 for YES, 1 for NO
       const targetIndex = side === "YES" ? 0 : 1;
       const marketIdNum = market.onchainId ? parseInt(market.onchainId) : 0;
       
-      const HELIORA_AUTHORITY = new PublicKey("By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT");
-      let txSig = `sig_${Math.random().toString(36).slice(2, 12)}`;
+      let txSig = "";
 
-      try {
-        // Trigger a REAL Solana Transaction
-        // We send a tiny amount of SOL (0.001) as a "Hybrid Gas Fee" to authorize the trade
-        toast.loading("Awaiting wallet transaction...", { id: "trade" });
+      if (market.onchainId && !isNaN(marketIdNum)) {
+        // --- REAL ON-CHAIN SWAP ---
+        toast.loading("Fetching on-chain market data...", { id: "trade" });
         
+        const marketIdBytes = new Uint8Array(4);
+        new DataView(marketIdBytes.buffer).setUint32(0, marketIdNum, true);
+        const [marketPda] = PublicKey.findProgramAddressSync([Buffer.from('market'), marketIdBytes], programId);
+        
+        try {
+          const marketAccount = await program.account.market.fetch(marketPda);
+          const collateralMint = marketAccount.collateralMint as PublicKey;
+          const collateralVault = marketAccount.collateralVault as PublicKey;
+          const outcomeMint = marketAccount.outcomeMints[targetIndex] as PublicKey;
+          const outcomeVault = marketAccount.outcomeVaults[targetIndex] as PublicKey;
+
+          const userCollateral = getAssociatedTokenAddressSync(collateralMint, publicKey);
+          const userOutcome = getAssociatedTokenAddressSync(outcomeMint, publicKey);
+
+          toast.loading(`Awaiting ${amount} USDC on-chain swap...`, { id: "trade" });
+          
+          // Convert amount to decimals (assuming 6 decimals for USDC)
+          const amountIn = new anchor.BN(amount * 1_000_000);
+
+          txSig = await program.methods
+            .swap(marketIdNum, targetIndex, amountIn)
+            .accounts({
+              market: marketPda,
+              user: publicKey,
+              userCollateral,
+              collateralVault,
+              userOutcome,
+              outcomeVault,
+              tokenProgram: TOKEN_PROGRAM_ID,
+            })
+            .rpc();
+
+          toast.loading("Confirming on-chain trade...", { id: "trade" });
+          await connection.confirmTransaction(txSig, "confirmed");
+        } catch (err: any) {
+          console.error("On-chain swap failed:", err);
+          throw new Error(`On-chain swap failed: ${err.message}`);
+        }
+      } else {
+        // --- HYBRID GAS-ONLY MODE (Fallback) ---
+        const HELIORA_AUTHORITY = new PublicKey("By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT");
+        toast.loading("Awaiting hybrid authorization...", { id: "trade" });
+
         const transaction = new anchor.web3.Transaction().add(
           anchor.web3.SystemProgram.transfer({
             fromPubkey: publicKey,
             toPubkey: HELIORA_AUTHORITY,
-            lamports: 1_000_000, // 0.001 SOL
+            lamports: 1_000_000, // 0.001 SOL hybrid fee
           })
         );
 
@@ -262,26 +330,22 @@ export default function MarketDetail() {
 
         const signed = await signTransaction(transaction);
         txSig = await connection.sendRawTransaction(signed.serialize());
-        
-        toast.loading("Confirming on-chain...", { id: "trade" });
+
+        toast.loading("Confirming authorization...", { id: "trade" });
         await connection.confirmTransaction(txSig, "confirmed");
-      } catch (signErr: any) {
-        console.warn("Wallet transaction failed:", signErr);
-        toast.error(`Transaction failed: ${signErr.message || 'Declined'}`, { id: "trade" });
-        setIsBuying(false);
-        return;
       }
 
-      // Record the trade via API with the REAL on-chain transaction signature
+      // Record the trade via API
       await api.placeTrade({
         marketId: id!,
         side,
         shares,
         kind: orderType.toLowerCase() as any,
+        price: orderType === "Limit" ? (Number(limitPrice) || 0) / 100 : undefined,
         txSig,
       });
 
-      toast.success(marketIdNum ? "Institutional trade confirmed!" : "Trade executed via Heliora Hybrid Engine", { id: "trade" });
+      toast.success(market.onchainId ? "On-chain trade confirmed!" : "Trade executed via Heliora Hybrid Engine", { id: "trade" });
       queryClient.invalidateQueries({ queryKey: ["market", id] });
     } catch (err: any) {
       console.error(err);
@@ -290,6 +354,7 @@ export default function MarketDetail() {
       setIsBuying(false);
     }
   };
+
 
   const handleClaim = async () => {
     if (!publicKey || !signTransaction) return;
@@ -364,12 +429,45 @@ export default function MarketDetail() {
     }
   };
 
-  // ─── Live price (WebSocket + polling fallback)
+  const handleDownload = () => {
+    if (!pricePoints.length) {
+      toast.error("No market data available to download");
+      return;
+    }
+    const csv = [
+      ["Timestamp", "Yes Price", "No Price"],
+      ...pricePoints.map(p => [p.ts, p.yesPrice.toFixed(4), p.noPrice.toFixed(4)])
+    ].map(e => e.join(",")).join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `heliora-market-${id}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    toast.success("Market data exported as CSV");
+  };
+
+  // ─── State & Real-Time Sync
+  const [range, setRange] = useState<Range>("1D");
   const [livePrice, setLivePrice] = useState(seedYes);
   const [tickDir, setTickDir] = useState<"up" | "down" | "flat">("flat");
   const wsConnected = wsStatus === "open";
   const prevPriceRef = useRef(seedYes);
   const [wsOrderbook, setWsOrderbook] = useState<{ yes: OBRow[]; no: OBRow[] } | null>(null);
+
+  // Professional Price Sentiment Engine
+  const startPrice = useMemo(() => {
+    const pts = filterPointsByRange(pricePoints, range);
+    return pts[0]?.yesPrice || 0.5;
+  }, [pricePoints, range]);
+
+  const change = livePrice - startPrice;
+  const changePct = (change / startPrice) * 100;
+  const isUp = change >= 0;
+  const sentimentColor = "#22c55e";
+  const sentimentBg = isUp ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)";
 
   // Sync live price from API
   useEffect(() => {
@@ -383,13 +481,19 @@ export default function MarketDetail() {
   }, [market?.yesPrice]);
 
   // WebSocket sync from hook
+  // Stable Real-Time Synchronization (Throttled to 100ms)
+  const lastUpdateTime = useRef(0);
   useEffect(() => {
     if (socketPrice !== null) {
-      setLivePrice((prev) => {
-        setTickDir(socketPrice > prev ? "up" : socketPrice < prev ? "down" : "flat");
-        prevPriceRef.current = prev;
-        return socketPrice;
-      });
+      const now = Date.now();
+      if (now - lastUpdateTime.current > 100) {
+        setLivePrice((prev) => {
+          setTickDir(socketPrice > prev ? "up" : socketPrice < prev ? "down" : "flat");
+          prevPriceRef.current = prev;
+          return socketPrice;
+        });
+        lastUpdateTime.current = now;
+      }
     }
   }, [socketPrice]);
 
@@ -428,9 +532,16 @@ export default function MarketDetail() {
   const [orderType, setOrderType] = useState<OrderType>("Market");
   const [amount, setAmount] = useState(100);
   const [limitPrice, setLimitPrice] = useState<number | "">(Math.round(seedYes * 100));
+  const [isSticky, setIsSticky] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => setIsSticky(window.scrollY > 40);
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   const [chartMode, setChartMode] = useState<ChartMode>("Line");
   const [showOrderDropdown, setShowOrderDropdown] = useState(false);
-  const [range, setRange] = useState<Range>("1D");
   const [tab, setTab] = useState<"orderbook" | "activity" | "holders" | "agents" | "rules">("orderbook");
   const [bookmarked, setBookmarked] = useState(false);
   const [utilityMenuOpen, setUtilityMenuOpen] = useState(false);
@@ -472,7 +583,27 @@ export default function MarketDetail() {
   }, [data?.recentTrades, seedYes]);
 
   const subMarkets = useMemo(() => buildSubMarkets(seedYes, market?.volume ?? 0), [seedYes, market?.volume]);
-  const holders = useMemo(() => generateHolders(seedYes), [seedYes, market?.id]);
+  const { data: holdersData } = useQuery({
+    queryKey: ["holders", id],
+    queryFn: () => api.getHolders(id!),
+    enabled: !!id && tab === "holders",
+    refetchInterval: 3000,
+  });
+
+  const holders = useMemo(() => {
+    if (holdersData?.holders && holdersData.holders.length > 0) {
+      return holdersData.holders.map((h, i) => ({
+        id: i,
+        addr: h.handle || `${h.wallet.slice(0, 6)}...${h.wallet.slice(-4)}`,
+        isAgent: h.isAgent,
+        side: (h.yesShares >= h.noShares ? "YES" : "NO") as Side,
+        shares: Math.round(h.totalShares),
+        avgPrice: h.avgPrice,
+        pnl: 0,
+      }));
+    }
+    return generateHolders(seedYes);
+  }, [holdersData, seedYes]);
 
   const yesCents = Math.round(livePrice * 100);
   const noCents = 100 - yesCents;
@@ -494,7 +625,7 @@ export default function MarketDetail() {
       <PageShell>
         <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6">
           <div className="rounded-full bg-destructive/10 p-4">
-             <Info className="h-10 w-10 text-destructive" />
+            <Info className="h-10 w-10 text-destructive" />
           </div>
           <div className="text-center">
             <h2 className="text-xl font-bold text-white">Market Connectivity Lost</h2>
@@ -511,246 +642,339 @@ export default function MarketDetail() {
   return (
     <PageShell>
       <div className="relative min-h-screen bg-[#0a0a0a] text-white">
-      {/* Background Ambient Glow */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[600px] bg-gradient-to-b from-white/[0.03] to-transparent opacity-50" />
+        {/* Background Ambient Glow */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[600px] bg-gradient-to-b from-white/[0.03] to-transparent opacity-50" />
 
-      <div className="container max-w-[1400px] py-8 px-6">
-        {/* Main Layout Grid */}
-        <div className="grid gap-12 lg:grid-cols-[1fr_360px]">
-          
-          {/* LEFT COLUMN: Header + Sub-markets + Chart */}
-          <div className="min-w-0 space-y-8">
-            
-            {/* Kalshi-style Header */}
-            <header className="flex items-start justify-between">
-              <div className="flex gap-4">
-                {/* Market Avatar */}
-                <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/10 shadow-2xl lg:h-16 lg:w-16">
-                  <img
-                    src={market.imageUrl || `https://api.dicebear.com/7.x/shapes/svg?seed=${market.id}`}
-                    className="h-full w-full object-cover"
-                    alt=""
+        <div className="container max-w-[1400px] py-4 px-6">
+          {/* Main Layout Grid */}
+          <div className="grid gap-12 lg:grid-cols-[1fr_360px]">
+
+            {/* LEFT COLUMN: Header + Sub-markets + Chart */}
+            <div className="min-w-0 space-y-4">
+
+              {/* Market Header */}
+              <header className="sticky top-0 z-50 -mx-4 mb-4 bg-[#0a0a0a]/90 px-4 py-2.5 backdrop-blur-xl border-b border-white/5 flex items-start justify-between">
+                <div className="flex gap-4">
+                  {/* Market Avatar */}
+                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-white/10 shadow-2xl lg:h-12 lg:w-12">
+                    {market.imageUrl ? (
+                      <img src={market.imageUrl} className="h-full w-full object-cover" alt="" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-white/5">
+                        <Globe className="h-5 w-5 text-white/20" />
+                      </div>
+                    )}
+                  </div>
+                  {/* Breadcrumb & Title */}
+                  <div className="flex flex-col gap-1 pt-0.5">
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/40">
+                      <span>{market.category}</span>
+                      <span className="opacity-30">·</span>
+                      <span className="text-[#22c55e] flex items-center gap-1">
+                        <Zap className="h-2.5 w-2.5 fill-current" />
+                        Trending
+                      </span>
+                    </div>
+                    <h1 className="font-display text-lg leading-tight tracking-tight text-white md:text-xl lg:text-2xl">
+                      {market.question}
+                    </h1>
+
+                    {/* Market Meta Stats Row */}
+                    <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-2">
+                      <div className="flex items-center gap-2 group transition-opacity hover:opacity-80">
+                        <Users className="h-3 w-3 text-white/40" />
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="font-mono text-[12px] font-bold text-white/90">{market.participants || 124}</span>
+                          <span className="text-[9px] font-black uppercase tracking-widest text-white/20">Participants</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 group transition-opacity hover:opacity-80">
+                        <Activity className="h-3 w-3 text-white/40" />
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="font-mono text-[12px] font-bold text-white/90">{market.totalTrades || 850}</span>
+                          <span className="text-[9px] font-black uppercase tracking-widest text-white/20">Trades</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 group transition-opacity hover:opacity-80">
+                        <Globe className="h-3 w-3 text-white/40" />
+                        <span className="text-[9px] font-black uppercase tracking-widest text-white/40">AI Oracle</span>
+                      </div>
+
+                      <div className="flex items-center gap-2 group transition-opacity hover:opacity-80">
+                        <ShieldCheck className="h-3 w-3 text-[#22c55e]" />
+                        <span className="text-[9px] font-black uppercase tracking-widest text-[#22c55e]">On-Chain Verified</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Header Action Icons */}
+                <div className="flex items-center">
+                  <HeaderAction
+                    icon={Calendar}
+                    label="Watchlist"
+                    active={isWatched}
+                    onClick={() => toggleWatchlist.mutate()}
+                  />
+                  <HeaderAction
+                    icon={MessageSquare}
+                    label="Discuss"
+                    onClick={() => document.getElementById('discussion')?.scrollIntoView({ behavior: 'smooth' })}
+                  />
+                  <HeaderAction
+                    icon={Share2}
+                    label="Share"
+                    onClick={handleShare}
+                  />
+                  <HeaderAction
+                    icon={Download}
+                    label="Export"
+                    onClick={handleDownload}
                   />
                 </div>
-                {/* Breadcrumb & Title */}
-                <div className="flex flex-col gap-2 pt-1">
-                  <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-white/40">
-                    <span>{market.category}</span>
-                    <span className="opacity-30">·</span>
-                    <span className="text-[#00FFBD] flex items-center gap-1">
-                      <Zap className="h-3 w-3 fill-current" />
-                      Trending
-                    </span>
+              </header>
+
+              {/* Reverted Prediction Chart Section (Borderless) */}
+              <div className="overflow-hidden">
+                <div className="flex items-center justify-between px-2 pb-2">
+                  <div className="flex items-center gap-6">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-white/30">Current Odds</span>
+                        <div className="flex items-center gap-3">
+                          <span 
+                            className="text-5xl font-black tabular-nums tracking-tighter transition-colors duration-500"
+                            style={{ color: sentimentColor }}
+                          >
+                            {(livePrice * 100).toFixed(0)}¢
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {isUp ? <TrendingUp className="h-3 w-3" style={{ color: sentimentColor }} /> : <TrendingDown className="h-3 w-3" style={{ color: sentimentColor }} />}
+                            <span className="text-xs font-black" style={{ color: sentimentColor }}>
+                              {isUp ? "+" : ""}{changePct.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                    <div className="h-6 w-px bg-white/5" />
+
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-white/20">
+                        24h Volume
+                      </span>
+                      <span className="font-mono text-xs font-bold text-white/60">
+                        {formatUsd(market.volume || 142050)}
+                      </span>
+                    </div>
                   </div>
-                  <h1 className="font-display text-xl leading-[1.1] tracking-tight text-white md:text-2xl lg:text-3xl">
-                    {market.question}
-                  </h1>
+
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-0.5 rounded-lg bg-white/[0.03] p-0.5">
+                      <button 
+                      onClick={() => setChartMode("Line")}
+                      className={cn("rounded-md px-2 py-1 text-[9px] font-black uppercase tracking-widest transition-all", chartMode === "Line" ? "bg-white/10 text-white" : "text-white/20 hover:text-white/40")}
+                    >Line</button>
+                    <button 
+                      onClick={() => setChartMode("Candle")}
+                      className={cn("rounded-md px-2 py-1 text-[9px] font-black uppercase tracking-widest transition-all", chartMode === "Candle" ? "bg-white/10 text-white" : "text-white/20 hover:text-white/40")}
+                    >Candles</button>
+                  </div>
+
+                    <div className="flex items-center gap-0.5 rounded-lg bg-white/[0.03] p-0.5">
+                      {(["1H", "1D", "1W", "1M", "ALL"] as Range[]).map((r) => (
+                        <button
+                          key={r}
+                          onClick={() => setRange(r)}
+                          className={cn(
+                            "rounded-md px-2 py-1 text-[9px] font-black uppercase tracking-widest transition-all",
+                            range === r
+                              ? "bg-white/10 text-white"
+                              : "text-white/20 hover:text-white/40"
+                          )}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="h-[300px] w-full">
+                  {chartMode === "Line" ? (
+                    <PolymarketChart pricePoints={pricePoints} live={livePrice} range={range} />
+                  ) : (
+                    <PredictionCandleChart pricePoints={pricePoints} live={livePrice} range={range} />
+                  )}
                 </div>
               </div>
 
-              {/* Header Action Icons */}
-              <div className="flex items-center gap-0 pt-2">
-                <HeaderAction icon={Calendar} label="Schedule" />
-                <HeaderAction icon={MessageSquare} label="Discuss" />
-                <HeaderAction icon={Share2} label="Export" onClick={handleShare} />
-                <HeaderAction icon={Download} label="Download" />
-              </div>
-            </header>
-
-            {/* Chart Header: Legend + Controls */}
-            <div className="flex items-center justify-between pb-2">
-              <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-success" />
-                  <span className="text-[11px] font-black uppercase tracking-widest text-white/40">YES</span>
-                  <span className="text-sm font-bold text-success">{(livePrice * 100).toFixed(0)}¢</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-destructive" />
-                  <span className="text-[11px] font-black uppercase tracking-widest text-white/40">NO</span>
-                  <span className="text-sm font-bold text-destructive">{((1 - livePrice) * 100).toFixed(0)}¢</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-4 text-[11px] font-black uppercase tracking-widest text-white/40">
-                  {(["1D", "1W", "1M", "1Y", "ALL"] as Range[]).map((r) => (
+              {/* Market Tabs */}
+              <div className="space-y-6">
+                <div className="flex items-center gap-8 border-b border-white/5 pb-px">
+                  {[
+                    { id: "orderbook", label: "Order Book" },
+                    { id: "activity", label: "Activity" },
+                    { id: "holders", label: "Holders" },
+                    { id: "rules", label: "About" },
+                  ].map((t) => (
                     <button
-                      key={r}
-                      onClick={() => setRange(r)}
-                      className={cn("transition-colors hover:text-white", range === r && "text-white")}
+                      key={t.id}
+                      onClick={() => setTab(t.id as any)}
+                      className={cn(
+                        "relative pb-4 text-sm font-bold transition-colors",
+                        tab === t.id ? "text-white" : "text-white/40 hover:text-white/60"
+                      )}
                     >
-                      {r}
+                      {t.label}
+                      {tab === t.id && (
+                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#22c55e]" />
+                      )}
                     </button>
                   ))}
                 </div>
-                <div className="flex items-center gap-2 border-l border-white/10 pl-4">
-                  <div className="flex items-center rounded-md bg-white/5 p-0.5">
-                    <button 
-                      onClick={() => setChartMode("Line")}
-                      className={cn("p-1.5 rounded transition", chartMode === "Line" ? "bg-white/10 text-white" : "text-white/20 hover:text-white/40")}
-                    >
-                      <LineChartIcon className="h-3.5 w-3.5" />
-                    </button>
-                    <button 
-                      onClick={() => setChartMode("Candle")}
-                      className={cn("p-1.5 rounded transition", chartMode === "Candle" ? "bg-white/10 text-white" : "text-white/20 hover:text-white/40")}
-                    >
-                      <CandlestickChart className="h-3.5 w-3.5" />
-                    </button>
+
+                <div className="min-h-[400px]">
+                  {tab === "orderbook" && (
+                    <div className="space-y-12">
+                      <PolymarketOrderBook yes={orderbook.yes} no={orderbook.no} mid={livePrice} />
+                      <AgentsSection marketId={id!} yesPrice={livePrice} />
+                    </div>
+                  )}
+                  {tab === "activity" && <ActivityList rows={activity} />}
+                  {tab === "holders" && <HoldersList rows={holders} />}
+                  {tab === "rules" && <ResolutionRules market={market} />}
+                </div>
+
+                {/* Discussion Section */}
+                <div id="discussion" className="mt-16 border-t border-white/5 pt-12">
+                  <CommentSection marketId={id!} trades={data?.recentTrades} />
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT COLUMN: Execution Sidebar */}
+            <aside className="space-y-6 lg:sticky lg:top-10 lg:self-start">
+              <div className="overflow-hidden rounded-3xl border border-white/5 bg-[#141414] shadow-[0_24px_48px_-12px_rgba(0,0,0,0.5)]">
+                <div className="flex gap-4 p-5 pb-4">
+                  <div className="h-10 w-10 shrink-0 rounded-lg border border-white/5 bg-white/5 flex items-center justify-center overflow-hidden">
+                    {market.imageUrl ? (
+                      <img src={market.imageUrl} className="h-full w-full object-cover" alt="" />
+                    ) : (
+                      <Globe className="h-5 w-5 text-white/20" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="line-clamp-2 text-xs font-bold leading-tight text-white/90">
+                      {market.question}
+                    </div>
+                    <div className="mt-1 text-[10px] font-bold text-[#22c55e]">
+                      Buy Yes · Before 2027
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Chart Section */}
-            <div className="relative mt-4">
-              <div className="h-[380px] w-full">
-                {chartMode === "Line" ? (
-                  <PolymarketChart pricePoints={pricePoints} live={livePrice} range={range} />
-                ) : (
-                  <PredictionCandleChart pricePoints={pricePoints} live={livePrice} range={range} />
-                )}
-              </div>
-              <div className="mt-4 flex items-center justify-between border-t border-white/5 pt-4">
-                <div className="font-mono text-sm font-bold text-white/40">
-                  {formatUsd(market.volume)} vol
+                <div className="flex items-center justify-between px-5 pb-4">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setIsSell(false)}
+                      className={cn("rounded-full border px-4 py-1.5 text-xs font-black uppercase tracking-widest transition", !isSell ? "border-[#22c55e] bg-[#22c55e]/10 text-[#22c55e]" : "border-white/10 text-white/40 hover:text-white")}
+                    >
+                      Buy
+                    </button>
+                    <button
+                      onClick={() => setIsSell(true)}
+                      className={cn("rounded-full border px-4 py-1.5 text-xs font-black uppercase tracking-widest transition", isSell ? "border-white text-white" : "border-white/10 text-white/40 hover:text-white")}
+                    >
+                      Sell
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-0.5 rounded-lg bg-white/[0.03] p-0.5">
+                    <button
+                      onClick={() => setOrderType("Market")}
+                      className={cn("rounded-md px-2 py-1 text-[9px] font-black uppercase tracking-widest transition", orderType === "Market" ? "bg-white/10 text-white" : "text-white/20 hover:text-white/40")}
+                    >Market</button>
+                    <button
+                      onClick={() => setOrderType("Limit")}
+                      className={cn("rounded-md px-2 py-1 text-[9px] font-black uppercase tracking-widest transition", orderType === "Limit" ? "bg-white/10 text-white" : "text-white/20 hover:text-white/40")}
+                    >Limit</button>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Market Tabs */}
-            <div className="space-y-6">
-              <div className="flex items-center gap-8 border-b border-white/5 pb-px">
-                {[
-                  { id: "orderbook", label: "Order Book" },
-                  { id: "activity", label: "Activity" },
-                  { id: "holders", label: "Holders" },
-                  { id: "agents", label: "Agents" },
-                  { id: "rules", label: "About" },
-                ].map((t) => (
+                <div className="grid grid-cols-2 gap-3 px-5 pb-6">
                   <button
-                    key={t.id}
-                    onClick={() => setTab(t.id as any)}
+                    onClick={() => setSide("YES")}
                     className={cn(
-                      "relative pb-4 text-sm font-bold transition-colors",
-                      tab === t.id ? "text-white" : "text-white/40 hover:text-white/60"
+                      "flex flex-col items-center gap-0.5 rounded-xl border py-4 transition-all",
+                      side === "YES" ? "border-[#22c55e] bg-[#22c55e]/5 text-[#22c55e]" : "border-white/10 text-white/60 hover:border-white/20"
                     )}
                   >
-                    {t.label}
-                    {tab === t.id && (
-                      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#22c55e]" />
-                    )}
+                    <span className="text-xl font-bold tabular-nums">Yes {yesCents}¢</span>
                   </button>
-                ))}
-              </div>
+                  <button
+                    onClick={() => setSide("NO")}
+                    className={cn(
+                      "flex flex-col items-center gap-0.5 rounded-xl border py-4 transition-all",
+                      side === "NO" ? "border-[#ef4444] bg-[#ef4444]/5 text-[#ef4444]" : "border-white/10 text-white/60 hover:border-white/20"
+                    )}
+                  >
+                    <span className="text-xl font-bold tabular-nums">No {noCents}¢</span>
+                  </button>
+                </div>
 
-              <div className="min-h-[400px]">
-                {tab === "orderbook" && (
-                  <PolymarketOrderBook yes={orderbook.yes} no={orderbook.no} mid={livePrice} />
+                {orderType === "Limit" && (
+                  <div className="px-5 pb-4">
+                    <div className="rounded-2xl border border-white/10 bg-black/40 p-5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white">Limit Price</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={limitPrice}
+                            onChange={(e) => setLimitPrice(Number(e.target.value) || "")}
+                            className="w-20 bg-transparent text-right font-display text-2xl font-black text-white focus:outline-none placeholder:text-white/20"
+                          />
+                          <span className="text-lg font-bold text-white/40">¢</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 )}
-                {tab === "activity" && <ActivityList rows={activity} />}
-                {tab === "holders" && <HoldersList rows={holders} />}
-                {tab === "agents" && <AgentsSection marketId={id!} yesPrice={livePrice} />}
-                {tab === "rules" && <ResolutionRules market={market} />}
-              </div>
 
-              {/* Discussion Section */}
-              <div className="mt-16 border-t border-white/5 pt-12">
-                <CommentSection marketId={id!} />
+                <div className="px-5 pb-6">
+                  <div className="rounded-2xl border border-white/10 bg-black/40 p-5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white">Amount</span>
+                      <input
+                        type="number"
+                        value={amount === 0 ? "" : amount}
+                        placeholder="$0"
+                        onChange={(e) => setAmount(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-transparent text-right font-display text-4xl font-black text-white focus:outline-none placeholder:text-white/20"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="px-5 pb-6">
+                  <button
+                    onClick={handleTrade}
+                    disabled={isBuying || amount <= 0}
+                    className={cn(
+                      "w-full rounded-2xl py-5 text-lg font-black text-black transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none",
+                      side === "YES" ? "bg-[#22c55e]" : "bg-[#ef4444]"
+                    )}
+                  >
+                    {isBuying ? "Processing..." : connected ? (isSell ? `Sell ${side}` : `Buy ${side}`) : "Connect to trade"}
+                  </button>
+                </div>
               </div>
-            </div>
+            </aside>
           </div>
-
-          {/* RIGHT COLUMN: Execution Sidebar */}
-          <aside className="space-y-6 lg:sticky lg:top-10 lg:self-start">
-            <div className="overflow-hidden rounded-3xl border border-white/5 bg-[#141414] shadow-[0_24px_48px_-12px_rgba(0,0,0,0.5)]">
-              <div className="flex gap-4 p-5 pb-4">
-                <img
-                  src={market.imageUrl || `https://api.dicebear.com/7.x/shapes/svg?seed=${market.id}`}
-                  className="h-10 w-10 shrink-0 rounded-lg object-cover"
-                  alt=""
-                />
-                <div className="min-w-0">
-                  <div className="line-clamp-2 text-xs font-bold leading-tight text-white/90">
-                    {market.question}
-                  </div>
-                  <div className="mt-1 text-[10px] font-bold text-[#22c55e]">
-                    Buy Yes · Before 2027
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between px-5 pb-4">
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => setIsSell(false)}
-                    className={cn("rounded-full border px-4 py-1.5 text-xs font-black uppercase tracking-widest transition", !isSell ? "border-[#22c55e] bg-[#22c55e]/10 text-[#22c55e]" : "border-white/10 text-white/40 hover:text-white")}
-                  >
-                    Buy
-                  </button>
-                  <button 
-                    onClick={() => setIsSell(true)}
-                    className={cn("rounded-full border px-4 py-1.5 text-xs font-black uppercase tracking-widest transition", isSell ? "border-white text-white" : "border-white/10 text-white/40 hover:text-white")}
-                  >
-                    Sell
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 px-5 pb-6">
-                <button 
-                  onClick={() => setSide("YES")}
-                  className={cn(
-                    "flex flex-col items-center gap-0.5 rounded-xl border py-4 transition-all",
-                    side === "YES" ? "border-[#22c55e] bg-[#22c55e]/5 text-[#22c55e]" : "border-white/10 text-white/60 hover:border-white/20"
-                  )}
-                >
-                  <span className="text-xl font-bold tabular-nums">Yes {yesCents}¢</span>
-                </button>
-                <button 
-                  onClick={() => setSide("NO")}
-                  className={cn(
-                    "flex flex-col items-center gap-0.5 rounded-xl border py-4 transition-all",
-                    side === "NO" ? "border-[#ef4444] bg-[#ef4444]/5 text-[#ef4444]" : "border-white/10 text-white/60 hover:border-white/20"
-                  )}
-                >
-                  <span className="text-xl font-bold tabular-nums">No {noCents}¢</span>
-                </button>
-              </div>
-
-              <div className="px-5 pb-6">
-                <div className="rounded-2xl border border-white/10 bg-black/40 p-5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">Amount</span>
-                    <input 
-                      type="number"
-                      value={amount === 0 ? "" : amount}
-                      placeholder="$0"
-                      onChange={(e) => setAmount(Number(e.target.value) || 0)}
-                      className="w-1/2 bg-transparent text-right font-display text-4xl font-black text-white focus:outline-none placeholder:text-white/20"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="px-5 pb-6">
-                <button 
-                  onClick={handleTrade}
-                  disabled={isBuying || amount <= 0}
-                  className={cn(
-                    "w-full rounded-2xl py-5 text-lg font-black text-black transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none",
-                    side === "YES" ? "bg-[#22c55e]" : "bg-[#ef4444]"
-                  )}
-                >
-                  {isBuying ? "Processing..." : connected ? (isSell ? `Sell ${side}` : `Buy ${side}`) : "Connect to trade"}
-                </button>
-              </div>
-            </div>
-          </aside>
         </div>
       </div>
-    </div>
     </PageShell>
   );
 }
@@ -784,7 +1008,6 @@ function generateCandles(end: number, trend: number, range: Range): Candle[] {
   const out: Candle[] = [];
   for (let i = 0; i < N; i++) {
     const o = v;
-    // Smoother walk with less extreme spikes
     v += (Math.random() - 0.5) * 0.015 + (end - v) * 0.03;
     v = Math.max(0.001, Math.min(0.999, v));
     const c = v;
@@ -797,373 +1020,164 @@ function generateCandles(end: number, trend: number, range: Range): Candle[] {
   return out;
 }
 
-/* ============================== Polymarket-style Line Chart + Volume Bars ============================== */
+/* ============================== Polymarket-style Line Chart ============================== */
 
-function PolymarketChart({ pricePoints, live, range }: { pricePoints: ApiPricePoint[]; live: number; range: Range }) {
-  const yesColor = "hsl(142 45% 45%)";
-  const noColor = "hsl(0 84% 60%)";
-
+function PolymarketChart({
+  pricePoints,
+  live,
+  range,
+}: {
+  pricePoints: ApiPricePoint[];
+  live: number;
+  range: Range;
+}) {
   const fullData = useMemo(() => {
     const pts = filterPointsByRange(pricePoints, range);
-    const lastPoint = pts[pts.length - 1];
-    const basePrice = lastPoint?.yesPrice ?? live;
-    
-    // 1. History
-    const history = pts.map(p => ({
-      ...p,
-      noPrice: 1 - p.yesPrice,
-      label: formatChartLabel(p.ts, range),
-      isFuture: false
-    }));
 
-    // 2. The "Now" Divider
-    const nowTs = new Date().toISOString();
+    const history = pts.map((p, i) => {
+      const prevPrice = i > 0 ? pts[i-1].yesPrice : p.yesPrice;
+      const volatility = Math.abs(p.yesPrice - prevPrice);
+      const syntheticVol = 500 + volatility * 50000 + (Math.random() * 200);
+
+      return {
+        ...p,
+        tsValue: new Date(p.ts).getTime(),
+        label: formatChartLabel(p.ts, range),
+        volume: syntheticVol,
+      };
+    });
+
+    const lastTs = history.length > 0 ? history[history.length - 1].tsValue : 0;
+    const nowTs = Date.now();
+    
     const nowPoint = {
-      ts: nowTs,
+      ts: new Date().toISOString(),
+      tsValue: Math.max(nowTs, lastTs + 1),
       yesPrice: live,
-      noPrice: 1 - live,
       label: "NOW",
-      isFuture: false,
-      isNow: true
+      noPrice: 1 - live,
+      volume: 0,
+      isNow: true,
     };
 
-    // 3. Prediction (Future Forecast)
-    const futurePoints: any[] = [];
-    const futureSpan = RANGE_MS[range === "ALL" ? "1D" : range] * 0.2; // project 20% into future
-    const steps = 15;
-    const stepInterval = futureSpan / steps;
-    let currentF = live;
-    let momentum = (live - (pts[pts.length - 5]?.yesPrice ?? live)) / 5;
-
-    for (let i = 1; i <= steps; i++) {
-      const ts = new Date(Date.now() + i * stepInterval).toISOString();
-      // Forecast logic: momentum + mean reversion to 0.5 + some AI jitter
-      momentum = momentum * 0.8 + (Math.random() - 0.5) * 0.015;
-      currentF += momentum;
-      currentF = Math.max(0.1, Math.min(0.9, currentF));
-      
-      futurePoints.push({
-        ts,
-        yesPrice: currentF,
-        noPrice: 1 - currentF,
-        label: formatChartLabel(ts, range),
-        isFuture: true
-      });
-    }
-
-    return [...history, nowPoint, ...futurePoints];
+    return [...history, nowPoint];
   }, [pricePoints, live, range]);
+
+  const primaryColor = "#22c55e";
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload || !payload.length) return null;
-    const isFuture = payload[0].payload.isFuture;
-    const yesVal = payload.find((p: any) => p.dataKey === "yesPrice")?.value;
-    const noVal = payload.find((p: any) => p.dataKey === "noPrice")?.value;
+    const val = payload[0].payload.yesPrice;
+    const timeLabel = payload[0].payload.label;
 
     return (
-      <div className="rounded-xl border border-white/10 bg-black/80 p-3 shadow-2xl backdrop-blur-xl">
-        <div className="mb-2 text-[10px] font-bold uppercase tracking-tighter text-white/40">
-          {isFuture ? "AI Prediction" : label}
+      <div className="rounded-xl border border-white/10 bg-black/90 p-3 shadow-2xl backdrop-blur-xl">
+        <div className="mb-1 text-[10px] font-bold text-white/40 uppercase tracking-wider">{timeLabel}</div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-lg font-black text-white">
+            {(val * 100).toFixed(1)}¢
+          </span>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between gap-8">
-            <div className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-[#00ff9d]" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-white/60">YES</span>
-            </div>
-            <span className="font-mono text-xs font-black text-[#00ff9d]">
-              {(yesVal * 100).toFixed(1)}¢
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-8">
-            <div className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-[#ff4d4d]" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-white/60">NO</span>
-            </div>
-            <span className="font-mono text-xs font-black text-[#ff4d4d]">
-              {(noVal * 100).toFixed(1)}¢
-            </span>
-          </div>
-        </div>
-        {isFuture && (
-          <div className="mt-2 border-t border-white/5 pt-2 text-[9px] font-bold uppercase italic tracking-widest text-white/20">
-            Confidence: 68%
-          </div>
-        )}
       </div>
     );
   };
 
   return (
-    <div className="flex h-[380px] w-full flex-col">
-      <div className="flex-1">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={fullData} margin={{ top: 16, right: 16, left: -8, bottom: 0 }} syncId="predchart">
-            <defs>
-              <linearGradient id="colorYes" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={yesColor} stopOpacity={0.1}/>
-                <stop offset="95%" stopColor={yesColor} stopOpacity={0}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 8" stroke="hsl(0 0% 100% / 0.05)" vertical={false} />
-            <XAxis
-              dataKey="label"
-              tick={{ fontSize: 10, fill: "hsl(0 0% 56%)", fontFamily: "JetBrains Mono, monospace" }}
-              axisLine={false}
-              tickLine={false}
-              interval="preserveStartEnd"
-              minTickGap={40}
-            />
-            <YAxis
-              domain={[0, 1]}
-              tick={{ fontSize: 10, fill: "hsl(0 0% 56%)", fontFamily: "JetBrains Mono, monospace" }}
-              tickFormatter={(v: number) => `${(v * 100).toFixed(0)}¢`}
-              axisLine={false}
-              tickLine={false}
-              width={36}
-            />
-            <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1 }} />
-            
-            <ReferenceLine x="NOW" stroke="#fff" strokeDasharray="3 3" label={{ position: 'top', value: 'LIVE', fill: '#fff', fontSize: 10, fontWeight: 'bold' }} />
+    <div className="h-full w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart
+          data={fullData}
+          margin={{ top: 20, right: 10, left: 0, bottom: 10 }}
+        >
+          <defs>
+            <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={primaryColor} stopOpacity={0.1}/>
+              <stop offset="95%" stopColor={primaryColor} stopOpacity={0}/>
+            </linearGradient>
+          </defs>
+          <CartesianGrid
+            strokeDasharray="3 8"
+            stroke="rgba(255,255,255,0.05)"
+            vertical={false}
+          />
+          <XAxis
+            dataKey="tsValue"
+            axisLine={false}
+            tickLine={false}
+            tick={{
+              fontSize: 10,
+              fill: "rgba(255,255,255,0.3)",
+              fontWeight: 700
+            }}
+            domain={['dataMin', 'dataMax']}
+            tickFormatter={(v) => {
+              const d = new Date(v);
+              if (range === "1H" || range === "1D") return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              return d.toLocaleDateString([], { month: "short", day: "numeric" });
+            }}
+            minTickGap={60}
+            dy={10}
+          />
+          <YAxis
+            orientation="right"
+            domain={[0, 1]}
+            tick={{
+              fontSize: 10,
+              fill: "rgba(255,255,255,0.3)",
+              fontWeight: 700
+            }}
+            tickFormatter={(v: number) => `${(v * 100).toFixed(0)}¢`}
+            axisLine={false}
+            tickLine={false}
+            width={35}
+            yAxisId="price"
+          />
+          <YAxis
+            hide
+            domain={[0, (v: number) => v * 4]} // Volume pane is the bottom 25%
+            yAxisId="vol"
+          />
+          <Tooltip
+            content={<CustomTooltip />}
+            cursor={{ stroke: "rgba(255,255,255,0.1)", strokeWidth: 1 }}
+          />
 
-            <Area
-              type="monotone"
-              dataKey="yesPrice"
-              stroke={yesColor}
-              strokeWidth={3}
-              fill="none"
-              isAnimationActive={false}
-              connectNulls
-            />
-            <Area
-              type="monotone"
-              dataKey="noPrice"
-              stroke={noColor}
-              strokeWidth={1.5}
-              fill="none"
-              strokeOpacity={0.4}
-              isAnimationActive={false}
-              connectNulls
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+          <Bar
+            dataKey="volume"
+            fill="rgba(255,255,255,0.05)"
+            yAxisId="vol"
+            isAnimationActive={false}
+          />
+          
+          <Area
+            type="linear"
+            dataKey="yesPrice"
+            stroke={primaryColor}
+            strokeWidth={3}
+            fill="url(#chartGradient)"
+            isAnimationActive={false}
+            connectNulls
+            yAxisId="price"
+            dot={({ cx, cy, payload }: any) => {
+              if (!payload.isNow) return null;
+              return (
+                <g>
+                  <circle cx={cx} cy={cy} r={4} fill={primaryColor} stroke="white" strokeWidth={2} />
+                  <circle cx={cx} cy={cy} r={10} fill={primaryColor} className="animate-ping" opacity={0.3} />
+                </g>
+              );
+            }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }
 
 
 
-/* ============================== Backpack-style Orderbook with Flash ============================== */
 
-function DepthBook({ side, rows, mid }: { side: Side; rows: OBRow[]; mid: number }) {
-  const isYes = side === "YES";
-  const max = rows.reduce((m, r) => Math.max(m, r.total), 0.001);
-  const bgFill = isYes ? "hsl(142 71% 45% / 0.12)" : "hsl(0 84% 60% / 0.12)";
-  const textColor = isYes ? "text-success" : "text-destructive";
 
-  // Flash animation tracking
-  const prevRowsRef = useRef<OBRow[]>([]);
-  const [flashedRows, setFlashedRows] = useState<Set<number>>(new Set());
-
-  useEffect(() => {
-    if (!prevRowsRef.current.length) {
-      prevRowsRef.current = rows;
-      return;
-    }
-    const changed = new Set<number>();
-    rows.forEach((r, i) => {
-      const prev = prevRowsRef.current[i];
-      if (prev && (Math.abs(prev.size - r.size) > 10 || Math.abs(prev.price - r.price) > 0.0005)) {
-        changed.add(i);
-      }
-    });
-    prevRowsRef.current = rows;
-    if (changed.size > 0) {
-      setFlashedRows(changed);
-      const t = setTimeout(() => setFlashedRows(new Set()), 550);
-      return () => clearTimeout(t);
-    }
-  }, [rows]);
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-border bg-background">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-border/60 bg-surface/30 px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <span className={cn("h-1.5 w-1.5 rounded-full", isYes ? "bg-success" : "bg-destructive")} />
-          <span className="text-xs font-semibold uppercase tracking-wider">{side}</span>
-        </div>
-        <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
-          <span>MID</span>
-          <span className="text-foreground/80">{mid.toFixed(3)}</span>
-          <span className="text-border">·</span>
-          <span>{(mid * 100).toFixed(1)}¢</span>
-        </div>
-      </div>
-      {/* Column headers */}
-      <div className="grid grid-cols-3 px-4 py-1.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60">
-        <span>Price</span>
-        <span className="text-right">Size</span>
-        <span className="text-right">Total</span>
-      </div>
-      {/* Rows */}
-      <div className="divide-y divide-border/20">
-        {rows.slice(0, 12).map((r, i) => {
-          const pct = (r.total / max) * 100;
-          const isFlashing = flashedRows.has(i);
-          return (
-            <div
-              key={i}
-              className={cn(
-                "relative grid grid-cols-3 items-center px-4 py-[5px] font-mono text-[11px] transition-colors hover:bg-surface-hover/30",
-                isFlashing && (isYes ? "animate-flash-green" : "animate-flash-red"),
-              )}
-            >
-              {/* Depth fill bar */}
-              <div
-                className="absolute inset-y-0 right-0 transition-all duration-500"
-                style={{ width: `${pct}%`, background: bgFill }}
-              />
-              <span className={cn("relative z-10 font-semibold", textColor)}>{r.price.toFixed(3)}</span>
-              <span className="relative z-10 text-right tabular-nums text-foreground/80">
-                {r.size.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </span>
-              <span className="relative z-10 text-right tabular-nums text-muted-foreground">
-                {r.total.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      {/* Footer */}
-      <div className="border-t border-border/40 px-4 py-2 font-mono text-[10px] text-muted-foreground">
-        Spread <span className="text-foreground/70">0.004</span> · Depth{" "}
-        <span className="text-foreground/70">{max.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-      </div>
-    </div>
-  );
-}
-
-function generateOrderbook(yesPrice: number) {
-  const yes: OBRow[] = [], no: OBRow[] = [];
-  let accY = 0, accN = 0;
-  for (let i = 0; i < 15; i++) {
-    const szY = Math.round(150 + Math.random() * 900);
-    const szN = Math.round(150 + Math.random() * 900);
-    accY += szY; accN += szN;
-    // Bids: Slightly below yesPrice
-    yes.push({ price: Math.max(0.0001, +(yesPrice - (i + 1) * 0.001).toFixed(4)), size: szY, total: accY });
-    // Asks: Slightly above yesPrice
-    no.push({ price: Math.min(0.9999, +(yesPrice + (i + 1) * 0.001).toFixed(4)), size: szN, total: accN });
-  }
-  return { yes, no };
-}
-
-/* ============================== AI Agents Panel ============================== */
-
-function AgentsPanel({ marketId, yesPrice }: { marketId: string; yesPrice: number }) {
-  const { data } = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => api.listAgents(),
-    staleTime: 30_000,
-  });
-
-  const agents = (data?.agents ?? []).filter((a) => a.status === "live").slice(0, 5);
-
-  const agentSentiments: Record<string, { view: string; confidence: number; action: string }> = useMemo(() => {
-    const out: Record<string, { view: string; confidence: number; action: string }> = {};
-    agents.forEach((a) => {
-      const yesBias = Math.random() > 0.42;
-      const conf = 55 + Math.random() * 40;
-      out[a.id] = {
-        view: yesBias ? "YES" : "NO",
-        confidence: +conf.toFixed(1),
-        action: conf > 75
-          ? (yesBias ? "Bought YES" : "Bought NO")
-          : conf > 60
-            ? "Monitoring"
-            : "Idle",
-      };
-    });
-    return out;
-  }, [agents.map((a) => a.id).join(",")]);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Active AI agents</div>
-        <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 font-mono text-[10px] text-success">
-          <span className="h-1 w-1 rounded-full bg-success animate-pulse-soft" />
-          {agents.length} live
-        </span>
-      </div>
-
-      {agents.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-          <Bot className="mx-auto mb-2 h-6 w-6" />
-          No agents monitoring this market yet.
-        </div>
-      ) : (
-        <div className="space-y-2.5">
-          {agents.map((a) => {
-            const sent = agentSentiments[a.id];
-            if (!sent) return null;
-            return (
-              <div key={a.id} className="rounded-xl border border-border bg-background p-4 transition hover:bg-surface-hover/30">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface">
-                      <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm">{a.name}</span>
-                        <span className="rounded-full bg-success/10 px-1.5 py-0.5 font-mono text-[9px] text-success uppercase">{a.type}</span>
-                      </div>
-                      <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{a.handle}</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className={cn("block rounded-md px-2 py-0.5 text-[11px] font-bold uppercase text-center", sent.view === "YES" ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive")}>
-                      {sent.view}
-                    </span>
-                    <div className="mt-1 font-mono text-[10px] text-muted-foreground">{sent.confidence.toFixed(0)}%</div>
-                  </div>
-                </div>
-                <div className="mt-3 flex items-center justify-between">
-                  <span className="font-mono text-[11px] text-muted-foreground">{sent.action}</span>
-                  <div className="flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
-                    <span>Win {a.winRate.toFixed(0)}%</span>
-                    <span className={cn(a.pnl30d >= 0 ? "text-success" : "text-destructive")}>
-                      {a.pnl30d >= 0 ? "+" : ""}{a.pnl30d.toFixed(1)}% 30d
-                    </span>
-                  </div>
-                </div>
-                {/* Confidence bar */}
-                <div className="mt-2 h-1 overflow-hidden rounded-full bg-border/40">
-                  <div
-                    className={cn("h-full rounded-full transition-all", sent.view === "YES" ? "bg-success" : "bg-destructive")}
-                    style={{ width: `${sent.confidence}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="rounded-xl border border-dashed border-border p-4 text-center">
-        <Brain className="mx-auto h-5 w-5 text-muted-foreground" />
-        <div className="mt-2 text-sm font-display">Let an agent trade this market</div>
-        <p className="mt-1 text-xs text-muted-foreground">Subscribe in 1 click. Performance fee only. Funds secured via Squads multisig.</p>
-        <Link to="/agents" className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-foreground px-3.5 py-2 text-xs font-semibold text-background shadow-button-inset hover:opacity-90">
-          Browse agents <ArrowUpRight className="h-3 w-3" />
-        </Link>
-      </div>
-    </div>
-  );
-}
 
 /* ============================== Supporting components ============================== */
 
@@ -1311,24 +1325,59 @@ function generateHolders(yesPrice: number) {
 
 function HoldersList({ rows }: { rows: ReturnType<typeof generateHolders> }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <div className="grid grid-cols-[40px_1fr_70px_110px_90px_80px] gap-2 border-b border-border bg-background px-4 py-2.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-        <span>#</span><span>Address</span><span>Side</span><span className="text-right">Shares</span><span className="text-right">Avg.</span><span className="text-right">P&L</span>
+    <div className="overflow-hidden rounded-2xl border border-white/5 bg-white/[0.01]">
+      <div className="grid grid-cols-[48px_1fr_80px_120px_100px_80px] gap-4 border-b border-white/5 bg-white/[0.02] px-6 py-4">
+        {["#", "Holders", "Side", "Shares", "Avg. Price", "P&L"].map((h, i) => (
+          <span key={h} className={cn("text-[10px] font-black uppercase tracking-widest text-white/20", i > 2 && "text-right")}>
+            {h}
+          </span>
+        ))}
       </div>
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-white/5">
         {rows.map((r, i) => (
-          <div key={r.id} className="grid grid-cols-[40px_1fr_70px_110px_90px_80px] items-center gap-2 px-4 py-2.5 text-xs transition hover:bg-surface-hover/50">
-            <span className="font-mono text-muted-foreground">{i + 1}</span>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-foreground/90">{r.addr}</span>
-              {r.isAgent && <span className="rounded border border-border px-1 py-0 font-mono text-[9px] uppercase text-muted-foreground">AI</span>}
+          <div key={r.id} className="grid grid-cols-[48px_1fr_80px_120px_100px_80px] items-center gap-4 px-6 py-4 text-xs transition hover:bg-white/[0.03]">
+            <span className="font-mono font-bold text-white/20">{i + 1}</span>
+            <div className="flex items-center gap-3">
+              <div className="h-7 w-7 rounded-lg bg-white/5 border border-white/5 overflow-hidden flex items-center justify-center">
+                {r.isAgent ? (
+                  <img src={getAvatar(r.addr, true)!} className="h-full w-full object-cover scale-110" alt="" />
+                ) : (
+                  <User className="h-3.5 w-3.5 text-white/20" />
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-white/90">{r.addr}</span>
+                {r.isAgent && (
+                  <span className="rounded bg-[#00FFBD]/10 px-1 py-0.5 font-mono text-[8px] font-black uppercase text-[#00FFBD] border border-[#00FFBD]/20">
+                    AI Agent
+                  </span>
+                )}
+              </div>
             </div>
-            <span className={cn("rounded px-1.5 py-0.5 text-center font-mono text-[10px] font-semibold", r.side === "YES" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>{r.side}</span>
-            <span className="text-right font-mono tabular-nums">{r.shares.toLocaleString()}</span>
-            <span className="text-right font-mono tabular-nums text-muted-foreground">{r.avgPrice.toFixed(3)}</span>
-            <span className={cn("text-right font-mono tabular-nums", r.pnl >= 0 ? "text-success" : "text-destructive")}>
-              {r.pnl >= 0 ? "+" : ""}{r.pnl.toFixed(1)}%
+            <div>
+              <span className={cn(
+                "inline-flex w-16 items-center justify-center rounded-md py-1 text-[10px] font-black uppercase tracking-tighter border",
+                r.side === "YES"
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                  : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+              )}>
+                {r.side}
+              </span>
+            </div>
+            <span className="text-right font-display text-sm font-black text-white tabular-nums">
+              {r.shares.toLocaleString()}
             </span>
+            <span className="text-right font-mono font-bold text-white/40 tabular-nums">
+              {(r.avgPrice * 100).toFixed(1)}¢
+            </span>
+            <div className="text-right">
+              <span className={cn(
+                "font-mono font-black tabular-nums",
+                r.pnl >= 0 ? "text-emerald-400" : "text-rose-400"
+              )}>
+                {r.pnl >= 0 ? "+" : ""}{r.pnl.toFixed(1)}%
+              </span>
+            </div>
           </div>
         ))}
       </div>
@@ -1408,37 +1457,131 @@ function ResolutionRules({ market }: { market: ApiMarket }) {
 
 /* ============================== Social Ideas / Comment Section ============================== */
 
-function CommentSection({ marketId }: { marketId: string }) {
+function CommentSection({ marketId, trades = [] }: { marketId: string; trades?: ApiTrade[] }) {
   const { address, connected } = useHelioraWallet();
   const queryClient = useQueryClient();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [newComment, setNewComment] = useState("");
+  const [selectedGif, setSelectedGif] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<ApiComment | null>(null);
   const [activeTab, setActiveTab] = useState<"ideas" | "activity">("ideas");
   const maxChars = 800;
+  const { livePrice: socketPrice, orderbook: socketOrderbook, status: wsStatus, lastSocialEvent } = useMarketSocket(marketId);
+
+  useEffect(() => {
+    if (lastSocialEvent) {
+      queryClient.invalidateQueries({ queryKey: ["comments", marketId] });
+    }
+  }, [lastSocialEvent, marketId, queryClient]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["comments", marketId],
     queryFn: () => api.getComments(marketId),
     enabled: !!marketId,
-    refetchInterval: 10000,
+    refetchInterval: 15000,
   });
 
   const postMutation = useMutation({
     mutationFn: (text: string) =>
       api.postComment(marketId, {
-        text,
+        text: replyTo ? `@${replyTo.wallet?.slice(0, 8)}... ${text}` : text,
+        gifUrl: selectedGif ?? undefined,
         wallet: address ?? undefined,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["comments", marketId] });
       setNewComment("");
+      setSelectedGif(null);
+      setReplyTo(null);
     },
   });
 
   const handlePost = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newComment.trim() || postMutation.isPending) return;
+    if ((!newComment.trim() && !selectedGif) || postMutation.isPending) return;
     postMutation.mutate(newComment.trim());
   };
+
+  const likeMutation = useMutation({
+    mutationFn: (commentId: string) => api.likeComment(commentId),
+    onMutate: async (commentId) => {
+      await queryClient.cancelQueries({ queryKey: ["comments", marketId] });
+      const previousComments = queryClient.getQueryData<{ comments: ApiComment[] }>(["comments", marketId]);
+
+      if (previousComments) {
+        queryClient.setQueryData(["comments", marketId], {
+          comments: previousComments.comments.map(c =>
+            c.id === commentId
+              ? { ...c, isLiked: !c.isLiked, likesCount: c.isLiked ? c.likesCount - 1 : c.likesCount + 1 }
+              : c
+          )
+        });
+      }
+      return { previousComments };
+    },
+    onError: (err, commentId, context) => {
+      if (context?.previousComments) {
+        queryClient.setQueryData(["comments", marketId], context.previousComments);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["comments", marketId] });
+    },
+  });
+
+  const bookmarkMutation = useMutation({
+    mutationFn: (commentId: string) => api.bookmarkComment(commentId),
+    onMutate: async (commentId) => {
+      await queryClient.cancelQueries({ queryKey: ["comments", marketId] });
+      const previousComments = queryClient.getQueryData<{ comments: ApiComment[] }>(["comments", marketId]);
+
+      if (previousComments) {
+        queryClient.setQueryData(["comments", marketId], {
+          comments: previousComments.comments.map(c =>
+            c.id === commentId ? { ...c, isBookmarked: !c.isBookmarked } : c
+          )
+        });
+      }
+      return { previousComments };
+    },
+    onError: (err, commentId, context) => {
+      if (context?.previousComments) {
+        queryClient.setQueryData(["comments", marketId], context.previousComments);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["comments", marketId] });
+    },
+  });
+
+  const handleReply = (comment: ApiComment) => {
+    setReplyTo(comment);
+    textareaRef.current?.focus();
+    textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  const handleShareComment = (c: ApiComment) => {
+    const url = `${window.location.origin}${window.location.pathname}?comment=${c.id}`;
+    if (navigator.share) {
+      navigator.share({
+        title: "Heliora Prediction",
+        text: c.text,
+        url: url,
+      });
+    } else {
+      navigator.clipboard.writeText(url);
+      toast.success("Link copied to clipboard");
+    }
+  };
+
+  const FEATURED_GIFS = [
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/mi6hc9rjZcPB0JzM12/giphy.gif", // Bullish
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/XClPnuZtG2yPyqTI6R/giphy.gif", // Bearish
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/tXL4FHPSnVJ0A/giphy.gif", // Waiting
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/M9O08f0a0dJvE0a2Lh/giphy.gif", // Alpha
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/ToMjGpx9F5ktZw8qPUQ/giphy.gif", // Panic
+    "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6Z3VndW1mZzB6JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/8Iv5lqKwKsZ2g/giphy.gif", // Success
+  ];
 
   const comments = data?.comments ?? [];
 
@@ -1464,81 +1607,217 @@ function CommentSection({ marketId }: { marketId: string }) {
       </div>
 
       {/* Composer */}
-      <form onSubmit={handlePost} className="relative space-y-4">
-        <textarea
-          value={newComment}
-          onChange={(e) => setNewComment(e.target.value.slice(0, maxChars))}
-          placeholder="What's your prediction?"
-          className="w-full bg-transparent p-0 text-lg font-medium text-white placeholder:text-white/20 focus:outline-none"
-          rows={3}
-        />
-        <div className="flex items-center justify-between border-b border-white/5 pb-6">
-          <button type="button" className="text-xs font-black uppercase tracking-widest text-white/40 hover:text-white">
-            GIF
-          </button>
-          <div className="flex items-center gap-6">
-            <span className="font-mono text-xs text-white/20">{maxChars - newComment.length} left</span>
-            <button
-              type="submit"
-              disabled={!newComment.trim() || postMutation.isPending}
-              className="rounded-xl bg-white px-8 py-3 text-sm font-black text-black transition hover:opacity-90 disabled:opacity-50"
-            >
-              Post
-            </button>
+      {activeTab === "ideas" && (
+        <form onSubmit={handlePost} className="relative space-y-4">
+          {replyTo && (
+            <div className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="flex items-center gap-2 text-xs font-bold text-white/40">
+                <MessageSquare className="h-3 w-3" />
+                <span>Replying to {replyTo.wallet?.slice(0, 8)}...</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyTo(null)}
+                className="text-[10px] font-black uppercase tracking-widest text-white/20 hover:text-white"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value.slice(0, maxChars))}
+            placeholder="What's your prediction?"
+            className="w-full bg-transparent p-0 text-lg font-medium text-white placeholder:text-white/20 focus:outline-none"
+            rows={3}
+          />
+
+          {selectedGif && (
+            <div className="relative w-max group">
+              <img src={selectedGif} alt="selected" className="h-32 rounded-lg border border-white/10 shadow-xl" />
+              <button
+                onClick={() => setSelectedGif(null)}
+                className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-black/80 text-white border border-white/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between border-b border-white/5 pb-6">
+            <Popover>
+              <PopoverTrigger asChild>
+                <button type="button" className="text-xs font-black uppercase tracking-widest text-white/40 hover:text-white transition-colors">
+                  GIF
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 border-white/10 bg-black/90 backdrop-blur-xl p-3" side="top" align="start">
+                <div className="grid grid-cols-2 gap-2">
+                  {FEATURED_GIFS.map((gif, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setSelectedGif(gif)}
+                      className="relative aspect-video overflow-hidden rounded-md border border-white/5 hover:border-white/20 transition-all active:scale-95"
+                    >
+                      <img src={gif} alt="gif" className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <div className="flex items-center gap-6">
+              <span className="font-mono text-xs text-white/20">{maxChars - newComment.length} left</span>
+              <button
+                type="submit"
+                disabled={(!newComment.trim() && !selectedGif) || postMutation.isPending}
+                className="rounded-xl bg-white px-8 py-3 text-sm font-black text-black transition hover:bg-white/90 disabled:opacity-50"
+              >
+                {postMutation.isPending ? "Posting..." : "Post"}
+              </button>
+            </div>
           </div>
-        </div>
-      </form>
+        </form>
+      )}
 
       {/* Feed */}
       <div className="divide-y divide-white/5">
-        {isLoading && (
-          <div className="py-12 text-center text-sm text-white/20">Loading thoughts...</div>
-        )}
-        {comments.map((c) => (
-          <div key={c.id} className="py-8 group">
-            <div className="flex gap-4">
-              {/* Avatar */}
-              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/5">
-                <img 
-                    src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${c.wallet || c.id}`} 
-                    alt="avatar"
-                    className="h-full w-full object-cover"
-                />
+        {activeTab === "ideas" ? (
+          <>
+            {isLoading && (
+              <div className="py-12 text-center text-sm text-white/20 animate-pulse">Loading thoughts...</div>
+            )}
+            {!isLoading && comments.length === 0 && (
+              <div className="py-20 text-center space-y-2">
+                <p className="text-sm font-bold text-white/20">No predictions yet</p>
+                <p className="text-xs text-white/10 italic">Be the first to share your alpha</p>
               </div>
-              
-              <div className="flex-1 space-y-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-black text-white hover:underline cursor-pointer">
-                    {c.wallet ? `${c.wallet.slice(0, 8)}...${c.wallet.slice(-4)}` : "jacknippleson"}
-                  </span>
-                  <span className="text-[11px] font-bold text-white/20">{timeAgo(c.createdAt)}</span>
-                  <span className="rounded bg-white/5 px-2 py-0.5 text-[10px] font-bold text-white/40 uppercase">No Position</span>
-                </div>
-                
-                <p className="text-base leading-relaxed text-white/90">
-                  {c.text}
-                </p>
+            )}
+            {comments.map((c) => (
+              <div key={c.id} className="py-8 group animate-in fade-in slide-in-from-bottom-2 duration-500">
+                <div className="flex gap-4">
+                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/5 shadow-2xl flex items-center justify-center">
+                    {c.isAgent ? (
+                      <img
+                        src={getAvatar(c.wallet || c.id, true)!}
+                        alt="avatar"
+                        className="h-full w-full object-cover scale-110"
+                      />
+                    ) : (
+                      <User className="h-5 w-5 text-white/20" />
+                    )}
+                  </div>
 
-                {/* Actions */}
-                <div className="flex items-center gap-6 pt-2 text-white/30">
-                  <button className="flex items-center gap-2 hover:text-white transition">
-                    <MessageSquare className="h-4 w-4" />
-                  </button>
-                  <button className="flex items-center gap-2 hover:text-white transition">
-                    <TrendingUp className="h-4 w-4" />
-                    <span className="text-xs font-bold">1</span>
-                  </button>
-                  <button className="flex items-center gap-2 hover:text-white transition">
-                    <Bookmark className="h-4 w-4" />
-                  </button>
-                  <button className="flex items-center gap-2 hover:text-white transition">
-                    <Share2 className="h-4 w-4" />
-                  </button>
+                  <div className="flex-1 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-black text-white hover:underline cursor-pointer">
+                        {c.wallet ? `${c.wallet.slice(0, 8)}...${c.wallet.slice(-4)}` : "anonymous"}
+                      </span>
+                      <span className="text-[11px] font-bold text-white/20">{timeAgo(c.createdAt)}</span>
+                      {c.isAgent && (
+                        <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[9px] font-black text-blue-400 uppercase tracking-widest ring-1 ring-blue-500/20">Oracle Node</span>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      {c.text && (
+                        <p className="text-base leading-relaxed text-white/90">
+                          {c.text}
+                        </p>
+                      )}
+                      {c.gifUrl && (
+                        <div className="w-fit overflow-hidden rounded-xl border border-white/5 bg-white/5 shadow-2xl">
+                          <img src={c.gifUrl} alt="comment gif" className="max-h-80 w-auto object-contain" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-6 pt-2 text-white/20">
+                      <button
+                        onClick={() => handleReply(c)}
+                        className="flex items-center gap-2 hover:text-white transition-colors"
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => likeMutation.mutate(c.id)}
+                        className={cn(
+                          "flex items-center gap-2 transition-colors group/vote",
+                          c.isLiked ? "text-emerald-400" : "hover:text-emerald-400"
+                        )}
+                      >
+                        <TrendingUp className={cn("h-4 w-4 group-hover/vote:-translate-y-0.5 transition-transform", c.isLiked && "fill-current")} />
+                        <span className="text-xs font-bold">{c.likesCount || 0}</span>
+                      </button>
+                      <button
+                        onClick={() => bookmarkMutation.mutate(c.id)}
+                        className={cn(
+                          "flex items-center gap-2 transition-colors",
+                          c.isBookmarked ? "text-sol-purple" : "hover:text-white"
+                        )}
+                      >
+                        <Bookmark className={cn("h-4 w-4", c.isBookmarked && "fill-current")} />
+                      </button>
+                      <button
+                        onClick={() => handleShareComment(c)}
+                        className="flex items-center gap-2 hover:text-white transition-colors"
+                      >
+                        <Share2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            ))}
+          </>
+        ) : (
+          <div className="py-4 space-y-1">
+            {trades.length === 0 ? (
+              <div className="py-20 text-center space-y-2">
+                <p className="text-sm font-bold text-white/20">No market activity yet</p>
+                <p className="text-xs text-white/10 italic">Be the first to trade this market</p>
+              </div>
+            ) : (
+              trades.map((t) => (
+                <div key={t.id} className="flex items-center justify-between py-5 transition-colors hover:bg-white/[0.02] px-2 rounded-xl group">
+                  <div className="flex items-center gap-4">
+                    <div className="h-10 w-10 overflow-hidden rounded-lg bg-white/5 border border-white/5 shadow-inner flex items-center justify-center">
+                      {t.isAgent ? (
+                        <img
+                          src={getAvatar(t.wallet || "anon", true)!}
+                          className="h-full w-full object-cover scale-110"
+                          alt=""
+                        />
+                      ) : (
+                        <User className="h-5 w-5 text-white/20" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-black text-white/90">
+                          {t.wallet ? `${t.wallet.slice(0, 8)}...${t.wallet.slice(-4)}` : "anonymous"}
+                        </span>
+                        <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-bold text-white/30 uppercase tracking-tighter">Trader</span>
+                      </div>
+                      <div className="text-xs font-medium">
+                        <span className="text-white/20">bought</span>
+                        <span className={cn("mx-1 font-black", t.side === "YES" ? "text-emerald-400" : "text-rose-400")}>
+                          {t.shares.toLocaleString()} {t.side}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right space-y-1">
+                    <div className="text-sm font-black text-white">${(t.price * 100).toFixed(1)}¢</div>
+                    <div className="text-[10px] font-bold text-white/20 uppercase tracking-widest">{timeAgo(t.createdAt)}</div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
-        ))}
+        )}
       </div>
     </div>
   );
@@ -1550,7 +1829,7 @@ function PredictionCandleChart({ pricePoints, live, range }: { pricePoints: ApiP
   const candles = useMemo(() => buildCandlesFromPoints(filterPointsByRange(pricePoints, range), live), [pricePoints, live, range]);
 
   const H = 380, PAD_X = 12, PAD_Y = 40;
-  const W = 1000; 
+  const W = 1000;
   const cw = (W - PAD_X * 2) / Math.max(1, candles.length);
 
   const minP = Math.min(...candles.map(c => c.l), live);
@@ -1571,7 +1850,7 @@ function PredictionCandleChart({ pricePoints, live, range }: { pricePoints: ApiP
             const y = scaleY(domainMin + span * p);
             return <line key={p} x1={0} x2={W} y1={y} y2={y} stroke="rgba(255,255,255,0.03)" strokeWidth="1" />;
           })}
-          
+
           {candles.map((k, i) => {
             const x = PAD_X + i * cw + cw / 2;
             const yH = scaleY(k.h), yL = scaleY(k.l), yO = scaleY(k.o), yC = scaleY(k.c);
@@ -1601,8 +1880,8 @@ function PredictionCandleChart({ pricePoints, live, range }: { pricePoints: ApiP
         ))}
       </div>
 
-      <div 
-        className="absolute right-0 px-1.5 py-0.5 bg-white text-[10px] font-black text-black rounded-l" 
+      <div
+        className="absolute right-0 px-1.5 py-0.5 bg-white text-[10px] font-black text-black rounded-l"
         style={{ top: lastY - 9 }}
       >
         {(live * 100).toFixed(1)}¢
@@ -1636,8 +1915,8 @@ function PolymarketOrderBook({ yes, no, mid }: { yes: OBRow[]; no: OBRow[]; mid:
       <div className="flex flex-col">
         {asks.slice(-5).map((r, i) => (
           <div key={`ask-${i}`} className="group relative grid grid-cols-[1fr_120px_120px] gap-4 px-6 py-2.5 transition hover:bg-white/5">
-            <div 
-              className="absolute inset-y-0 right-0 bg-[#ef4444]/10 transition-all duration-500" 
+            <div
+              className="absolute inset-y-0 right-0 bg-[#ef4444]/10 transition-all duration-500"
               style={{ width: `${(r.total / maxTotal) * 100}%` }}
             />
             <span className="relative font-display text-sm font-bold text-[#ef4444] tabular-nums">
@@ -1662,7 +1941,7 @@ function PolymarketOrderBook({ yes, no, mid }: { yes: OBRow[]; no: OBRow[]; mid:
         <div className="flex items-center gap-3">
           <span className="text-[10px] font-black uppercase tracking-widest text-white/20">Spread</span>
           <span className="font-mono text-xs font-bold text-white/60 tabular-nums">
-            {((Math.abs((asks[asks.length-1]?.price || 0) - (bids[0]?.price || 0))) * 100).toFixed(2)}¢
+            {((Math.abs((asks[asks.length - 1]?.price || 0) - (bids[0]?.price || 0))) * 100).toFixed(2)}¢
           </span>
         </div>
       </div>
@@ -1671,8 +1950,8 @@ function PolymarketOrderBook({ yes, no, mid }: { yes: OBRow[]; no: OBRow[]; mid:
       <div className="flex flex-col">
         {bids.slice(0, 5).map((r, i) => (
           <div key={`bid-${i}`} className="group relative grid grid-cols-[1fr_120px_120px] gap-4 px-6 py-2.5 transition hover:bg-white/5">
-            <div 
-              className="absolute inset-y-0 right-0 bg-[#22c55e]/10 transition-all duration-500" 
+            <div
+              className="absolute inset-y-0 right-0 bg-[#22c55e]/10 transition-all duration-500"
               style={{ width: `${(r.total / maxTotal) * 100}%` }}
             />
             <span className="relative font-display text-sm font-bold text-[#22c55e] tabular-nums">
@@ -1695,8 +1974,8 @@ function PolymarketOrderBook({ yes, no, mid }: { yes: OBRow[]; no: OBRow[]; mid:
           <span className="text-[9px] font-black uppercase tracking-widest text-white/20">Live Orderbook</span>
         </div>
         <div className="flex items-center gap-4">
-            <div className="h-1.5 w-1.5 rounded-full bg-[#22c55e] shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
-            <span className="text-[9px] font-black uppercase tracking-widest text-white/40">USDC Settlement</span>
+          <div className="h-1.5 w-1.5 rounded-full bg-[#22c55e] shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+          <span className="text-[9px] font-black uppercase tracking-widest text-white/40">USDC Settlement</span>
         </div>
       </div>
     </div>
@@ -1704,27 +1983,53 @@ function PolymarketOrderBook({ yes, no, mid }: { yes: OBRow[]; no: OBRow[]; mid:
 }
 
 function ActivityList({ rows }: { rows: any[] }) {
-    return (
-        <div className="space-y-3">
-            {rows.map((r) => (
-                <div key={r.id} className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] p-4 transition hover:bg-white/[0.04]">
-                    <div className="flex items-center gap-4">
-                        <div className={cn("h-8 w-8 rounded-full flex items-center justify-center text-[10px] font-bold", r.side === "YES" ? "bg-[#22c55e]/10 text-[#22c55e]" : "bg-[#ef4444]/10 text-[#ef4444]")}>
-                            {r.side[0]}
-                        </div>
-                        <div>
-                            <div className="text-sm font-bold text-white">{r.who}</div>
-                            <div className="text-[10px] font-medium text-white/40">{r.time}</div>
-                        </div>
-                    </div>
-                    <div className="text-right">
-                        <div className="text-sm font-black text-white">{r.amount.toLocaleString()} shares</div>
-                        <div className="text-[10px] font-bold text-white/40">at {Math.round(r.price * 100)}¢</div>
-                    </div>
-                </div>
-            ))}
+  return (
+    <div className="space-y-4">
+      {rows.length === 0 ? (
+        <div className="py-20 text-center space-y-2 border border-dashed border-white/5 rounded-2xl">
+          <p className="text-sm font-bold text-white/20 uppercase tracking-widest">No terminal activity detected</p>
         </div>
-    )
+      ) : (
+        rows.map((r) => (
+          <div key={r.id} className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.02] p-5 transition hover:bg-white/[0.04] group">
+            <div className="flex items-center gap-4">
+              <div className="h-10 w-10 overflow-hidden rounded-xl border border-white/5 bg-white/5 shadow-inner flex items-center justify-center">
+                {r.isAgent ? (
+                  <img
+                    src={getAvatar(r.who, true)!}
+                    className="h-full w-full object-cover scale-110"
+                    alt=""
+                  />
+                ) : (
+                  <User className="h-5 w-5 text-white/20" />
+                )}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-black text-white/90">{r.who}</span>
+                  {r.isAgent && (
+                    <span className="rounded bg-[#00FFBD]/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-[#00FFBD] border border-[#00FFBD]/20">
+                      AI Analyst
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-[10px] font-bold">
+                  <span className="text-white/20 uppercase">bought</span>
+                  <span className={cn("font-black", r.side === "YES" ? "text-emerald-400" : "text-rose-400")}>
+                    {r.amount.toLocaleString()} {r.side}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="text-right space-y-1">
+              <div className="text-sm font-black text-white">{(r.price * 100).toFixed(1)}¢</div>
+              <div className="text-[10px] font-black text-white/20 uppercase tracking-widest">{r.time}</div>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 }
 
 function AgentsSection({ marketId, yesPrice }: { marketId: string; yesPrice: number }) {
@@ -1753,8 +2058,8 @@ function AgentsSection({ marketId, yesPrice }: { marketId: string; yesPrice: num
     <div className="space-y-6">
       <div className="flex items-center justify-between border-b border-white/5 pb-4">
         <div className="flex items-center gap-2">
-            <Radio className="h-3 w-3 text-[#00FFBD] animate-pulse" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Live Agent Intelligence</span>
+          <Radio className="h-3 w-3 text-[#00FFBD] animate-pulse" />
+          <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Live Agent Intelligence</span>
         </div>
         <span className="text-[10px] font-black text-[#00FFBD] uppercase tracking-widest">3-Source Consensus Active</span>
       </div>
@@ -1771,8 +2076,8 @@ function AgentsSection({ marketId, yesPrice }: { marketId: string; yesPrice: num
               {/* Performance Header */}
               <div className="mb-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/5 bg-white/5 transition group-hover:border-[#00FFBD]/30">
-                    <Bot className="h-4 w-4 text-white/40 group-hover:text-[#00FFBD]" />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/5 bg-white/5 transition group-hover:border-[#00FFBD]/30 overflow-hidden">
+                    <img src={getAvatar(a.id, true)} className="h-full w-full object-cover" alt="" />
                   </div>
                   <div>
                     <div className="text-sm font-black text-white">{a.name}</div>
@@ -1789,7 +2094,7 @@ function AgentsSection({ marketId, yesPrice }: { marketId: string; yesPrice: num
 
               {/* Confidence Bar */}
               <div className="mb-4 h-1 w-full overflow-hidden rounded-full bg-white/5">
-                <div 
+                <div
                   className={cn("h-full transition-all duration-1000", a.view === "YES" ? "bg-[#22c55e]" : "bg-[#ef4444]")}
                   style={{ width: `${a.confidence}%` }}
                 />
@@ -1798,19 +2103,19 @@ function AgentsSection({ marketId, yesPrice }: { marketId: string; yesPrice: num
               {/* Stats Footer */}
               <div className="flex items-center justify-between border-t border-white/5 pt-4">
                 <div className="flex gap-4">
-                    <div>
-                        <div className="text-[9px] font-bold text-white/20 uppercase">Win Rate</div>
-                        <div className="text-xs font-black text-white">{a.winRate.toFixed(0)}%</div>
+                  <div>
+                    <div className="text-[9px] font-bold text-white/20 uppercase">Win Rate</div>
+                    <div className="text-xs font-black text-white">{a.winRate.toFixed(0)}%</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-bold text-white/20 uppercase">30D PnL</div>
+                    <div className={cn("text-xs font-black", a.pnl30d >= 0 ? "text-[#22c55e]" : "text-[#ef4444]")}>
+                      {a.pnl30d >= 0 ? "+" : ""}{a.pnl30d.toFixed(1)}%
                     </div>
-                    <div>
-                        <div className="text-[9px] font-bold text-white/20 uppercase">30D PnL</div>
-                        <div className={cn("text-xs font-black", a.pnl30d >= 0 ? "text-[#22c55e]" : "text-[#ef4444]")}>
-                            {a.pnl30d >= 0 ? "+" : ""}{a.pnl30d.toFixed(1)}%
-                        </div>
-                    </div>
+                  </div>
                 </div>
                 <div className="text-[10px] font-bold text-white/40 italic">
-                    {a.action}
+                  {a.action}
                 </div>
               </div>
             </div>
@@ -1820,18 +2125,47 @@ function AgentsSection({ marketId, yesPrice }: { marketId: string; yesPrice: num
 
       <div className="rounded-2xl border border-white/5 bg-[#00FFBD]/5 p-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
-            <Brain className="h-6 w-6 text-[#00FFBD]" />
-            <div className="max-w-md">
-                <h4 className="text-sm font-black text-white uppercase tracking-widest">Protocol Resolution Logic</h4>
-                <p className="mt-1 text-[11px] text-white/40 leading-relaxed">
-                    Heliora resolves markets by aggregating sentiment from a decentralized cluster of high-performance agents. Resolution requires a 3-source consensus with &gt;85% aggregate confidence.
-                </p>
-            </div>
+          <Brain className="h-6 w-6 text-[#00FFBD]" />
+          <div className="max-w-md">
+            <h4 className="text-sm font-black text-white uppercase tracking-widest">Protocol Resolution Logic</h4>
+            <p className="mt-1 text-[11px] text-white/40 leading-relaxed">
+              Heliora resolves markets by aggregating sentiment from a decentralized cluster of high-performance agents. Resolution requires a 3-source consensus with &gt;85% aggregate confidence.
+            </p>
+          </div>
         </div>
         <Link to="/agents" className="rounded-xl bg-white px-6 py-2.5 text-[10px] font-black text-black uppercase tracking-widest hover:opacity-90 transition shadow-[0_0_20px_rgba(255,255,255,0.1)]">
-            Delegate Capital
+          Delegate Capital
         </Link>
       </div>
     </div>
   );
 }
+
+
+
+function generateOrderbook(yesPrice: number) {
+  const yes: OBRow[] = [],
+    no: OBRow[] = [];
+  let accY = 0,
+    accN = 0;
+  for (let i = 0; i < 15; i++) {
+    const szY = Math.round(150 + Math.random() * 900);
+    const szN = Math.round(150 + Math.random() * 900);
+    accY += szY;
+    accN += szN;
+    // Bids: Slightly below yesPrice
+    yes.push({
+      price: Math.max(0.0001, +(yesPrice - (i + 1) * 0.001).toFixed(4)),
+      size: szY,
+      total: accY,
+    });
+    // Asks: Slightly above yesPrice
+    no.push({
+      price: Math.min(0.9999, +(yesPrice + (i + 1) * 0.001).toFixed(4)),
+      size: szN,
+      total: accN,
+    });
+  }
+  return { yes, no };
+}
+

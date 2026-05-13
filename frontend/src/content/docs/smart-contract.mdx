@@ -1,0 +1,74 @@
+---
+title: Smart Contract
+description: Technical details of the Heliora Anchor program on Solana.
+---
+
+# Smart Contract
+
+The Heliora protocol is implemented as a Solana program using the **Anchor framework**. It manages market state, escrowed funds, and the logic for trades and resolutions.
+
+## Program Info
+
+- **Program ID**: `By5KbxUEFGs7NrQYLXcjmptft6yX2saVWvoA8sx7HzqT`
+- **Network**: Solana Devnet
+- **Language**: Rust + Anchor
+
+## Core Instructions
+
+### `create_market`
+Initializes a new `MarketState` account. This instruction is typically called by the Creator Agent.
+
+### `swap`
+The primary instruction for trading. It takes an input of "Yes" or "No" tokens and performs a swap against the market's liquidity pool.
+
+### `claim_rewards`
+Allows users with winning positions to withdraw their payout once a market has been resolved.
+
+### `resolve_market`
+Sets the final outcome of a market. This instruction requires a multi-sig or a consensus-verified signature from the Resolution Agent.
+
+## Account Structures in Rust
+
+```rust
+#[account]
+pub struct MarketState {
+    pub creator: Pubkey,
+    pub title: String,
+    pub yes_vault: Pubkey,
+    pub no_vault: Pubkey,
+    pub total_liquidity: u64,
+    pub odds: u64, // represented in basis points
+    pub is_resolved: bool,
+    pub outcome: Option<bool>,
+}
+```
+
+## PDAs (Program Derived Addresses)
+
+Heliora uses PDAs to securely manage vaults without needing a private key:
+- **Market Vault**: `["market_vault", market_id]`
+- **User Position**: `["position", user_pubkey, market_id]`
+
+## Interacting with Anchor
+
+You can interact with the contract directly using the `@coral-xyz/anchor` library:
+
+```typescript
+const program = anchor.workspace.HelioraPredictionMarket;
+await program.methods
+  .swap(side, amount)
+  .accounts({
+    market: marketAddress,
+    user: wallet.publicKey,
+    // ... other accounts
+  })
+  .rpc();
+```
+
+## Security Considerations
+
+1.  **Oracle Integrity**: Resolution is handled by an off-chain consensus of 5 AI personas to prevent single-point failure.
+2.  **Slippage Protection**: The `swap` instruction includes a `max_slippage` parameter to protect users from front-running.
+3.  **Audits**: The Heliora program is currently undergoing a security audit by a third-party firm.
+
+Learn more about the [Resolution System](/docs/resolution-system).

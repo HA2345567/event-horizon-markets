@@ -1,0 +1,69 @@
+---
+title: Architecture
+description: A deep dive into the technical layers of the Heliora protocol.
+---
+
+# Architecture
+
+Heliora is designed with a layered architecture to ensure scalability, security, and high-performance AI integration.
+
+## System Diagram
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│                    CLIENT LAYER                         │
+│   ┌──────────────┐   ┌──────────────┐   ┌───────────┐   │
+│   │  Web App     │   │  Agent SDK   │   │ CLI Tool  │   │
+│   └──────┬───────┘   └──────┬───────┘   └─────┬─────┘   │
+└──────────┼──────────────────┼─────────────────┼─────────┘
+           │                  │                 │
+┌──────────▼──────────────────▼─────────────────▼─────────┐
+│                    AI AGENT LAYER                       │
+│   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌─────┐  │
+│   │ Scout    │   │ Creator  │   │ MM Agent │   │ Res │  │
+│   └────┬─────┘   └────┬─────┘   └────┬─────┘   └──┬──┘  │
+└────────┼──────────────┼──────────────┼──────────┼───────┘
+         │              │              │          │
+┌────────▼──────────────▼──────────────▼──────────▼───────┐
+│                    ON-CHAIN LAYER                       │
+│   ┌─────────────────────────────────────────────────┐   │
+│   │            Solana Program (Anchor)              │   │
+│   │  ┌────────────┐   ┌────────────┐   ┌─────────┐  │   │
+│   │  │MarketState │   │PositionAcc │   │ Vault   │  │   │
+│   │  └────────────┘   └────────────┘   └─────────┘  │   │
+│   └─────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+## The 4 Layers
+
+### 1. Data Layer
+The foundation of Heliora. We aggregate data from the Kalshi REST API, Pyth Network Oracles, and various News APIs. This layer is responsible for normalizing unstructured real-world data into formats that AI can process.
+
+### 2. AI Layer
+Powered by **Google Gemini 1.5 Pro**. This layer contains the logic for our autonomous agents. It performs sentiment analysis, calculates market odds, and manages the 5-persona consensus for resolution.
+
+### 3. SDK Layer
+The `@heliora/agent-sdk` provides a TypeScript interface for developers to interact with the protocol. It abstracts complex Solana transactions into simple function calls like `placePosition()`.
+
+### 4. On-chain Layer
+Built with **Rust and Anchor** on Solana. This is where the truth resides. It handles the escrow of funds, the bonding curve logic for trading, and the final state transitions during market resolution.
+
+## Account Structures
+
+| Account | Purpose | Data Contained |
+| :--- | :--- | :--- |
+| `MarketState` | Main market config | Odds, expiry, resolution criteria, creator |
+| `Position` | User's stake | Side (Yes/No), amount, entry price |
+| `Vault` | SPL Token escrow | Total liquidity, fees collected |
+
+## Tech Stack
+
+| Technology | Justification |
+| :--- | :--- |
+| **Solana** | High throughput (65k TPS), low latency, essential for 400ms deployment. |
+| **Anchor** | Industry standard framework for secure Solana programs. |
+| **Gemini 1.5 Pro** | Massive context window and superior reasoning for complex market analysis. |
+| **Next.js 14** | Best-in-class framework for the documentation and trading dashboard. |
+
+Explore the [Smart Contract](/docs/smart-contract) implementation details.

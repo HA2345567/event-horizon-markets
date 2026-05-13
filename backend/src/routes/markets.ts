@@ -135,6 +135,9 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
           take: 20,
         },
         oracleResolution: true,
+        _count: {
+          select: { trades: true }
+        }
       },
     });
 
@@ -142,17 +145,54 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
       market = await prisma.market.findFirst({
         where: { resolutionDetail: `kalshi:${req.params.id}` },
         include: {
-          pricePoints: {
-            orderBy: { ts: 'asc' },
-            take: 300,
-          },
-          trades: {
-            orderBy: { createdAt: 'desc' },
-            take: 20,
-          },
+          pricePoints: { orderBy: { ts: 'asc' }, take: 300 },
+          trades: { orderBy: { createdAt: 'desc' }, take: 20 },
           oracleResolution: true,
+          _count: {
+            select: { trades: true }
+          }
         },
       });
+    }
+
+    // Lazy Mirroring: If not found, check if it's a Kalshi ticker and create it
+    if (!market && req.params.id.includes('-')) {
+      try {
+        const r = await fetch(`https://api.elections.kalshi.com/trade-api/v2/markets/${req.params.id}`, {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (r.ok) {
+          const d = await r.json() as { market: any };
+          if (d.market) {
+            const m = d.market;
+            const newMarketId = newId();
+            market = await prisma.market.create({
+              data: {
+                id: newMarketId,
+                question: m.title,
+                category: m.category || 'Other',
+                description: m.subtitle || '',
+                endsAt: new Date(m.close_time),
+                yesPrice: m.yes_prob,
+                noPrice: 1 - m.yes_prob,
+                volume: (m.volume_24h || 0) / 100,
+                liquidity: (m.liquidity || 1000) / 100,
+                isLive: true,
+                resolutionDetail: `kalshi:${m.ticker}`,
+                creator: JSON.stringify({ wallet: 'system', handle: 'Heliora Bridge' }),
+              },
+              include: {
+                pricePoints: true,
+                trades: true,
+                oracleResolution: true,
+                _count: { select: { trades: true } }
+              }
+            }) as any;
+          }
+        }
+      } catch (err) {
+        console.error('[LazyMirror]', err);
+      }
     }
 
     // Fallback: Try matching by short UUID prefix (e.g. BAD52E93)
@@ -169,6 +209,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
             take: 20,
           },
           oracleResolution: true,
+          _count: { select: { trades: true } }
         },
       });
       if (markets.length > 0) market = markets[0];
@@ -181,6 +222,7 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
 
     const parsed = {
       ...market,
+      totalTrades: (market as any)._count?.trades || 0,
       creator: (() => { try { return JSON.parse(market.creator); } catch { return { wallet: market.creator }; } })(),
     };
 
@@ -232,18 +274,102 @@ router.get('/:id/orderbook', async (req: Request, res: Response): Promise<void> 
   }
 });
 
+// Get top holders for a market
+router.get('/:id/holders', async (req: Request, res: Response): Promise<void> => {
+  try {
+    let marketId = req.params.id;
+    let market = await prisma.market.findUnique({ where: { id: marketId } });
+    if (!market) {
+      market = await prisma.market.findFirst({ where: { resolutionDetail: `kalshi:${marketId}` } });
+      if (market) marketId = market.id;
+    }
+
+    if (!market) {
+      res.status(404).json({ error: 'Market not found' });
+      return;
+    }
+
+    const positions = await prisma.position.findMany({
+      where: {
+        marketId,
+        OR: [
+          { yesShares: { gt: 0 } },
+          { noShares: { gt: 0 } }
+        ]
+      },
+      include: {
+        user: true
+      },
+      orderBy: {
+        yesShares: 'desc'
+      },
+      take: 20
+    });
+
+    const agents = await prisma.agent.findMany({
+      select: { wallet: true }
+    });
+    const agentWallets = new Set(agents.map(a => a.wallet));
+
+    const holders = positions.map(p => ({
+      id: p.id,
+      wallet: p.user.wallet,
+      handle: p.user.handle,
+      isAgent: agentWallets.has(p.user.wallet),
+      yesShares: p.yesShares,
+      noShares: p.noShares,
+      totalShares: p.yesShares + p.noShares,
+      avgPrice: (p.avgYesCost + p.avgNoCost) / 2,
+    })).sort((a, b) => b.totalShares - a.totalShares);
+
+    res.json({ holders });
+    return;
+  } catch (error) {
+    console.error('[HoldersAPI]', error);
+    res.status(500).json({ error: 'Failed to fetch holders' });
+    return;
+  }
+});
+
 // --- Comments ---
 
 // Get comments for a market
 router.get('/:id/comments', async (req: Request, res: Response): Promise<void> => {
   try {
+    let marketId = req.params.id;
+    const wallet = req.headers['x-wallet'] as string;
+
+    let market = await prisma.market.findUnique({ where: { id: marketId } });
+    if (!market) market = await prisma.market.findFirst({ where: { resolutionDetail: `kalshi:${marketId}` } });
+    if (market) marketId = market.id;
+
     const comments = await prisma.comment.findMany({
-      where: { marketId: req.params.id },
+      where: { marketId },
+      include: {
+        _count: {
+          select: { likes: true }
+        },
+        likes: wallet ? {
+          where: { wallet }
+        } : false,
+        bookmarks: wallet ? {
+          where: { wallet }
+        } : false,
+      },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
-    res.json({ comments });
+
+    const parsed = comments.map(c => ({
+      ...c,
+      isLiked: c.likes?.length > 0,
+      isBookmarked: c.bookmarks?.length > 0,
+      likesCount: c.likesCount, // Or use c._count.likes if we want live count
+    }));
+
+    res.json({ comments: parsed });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: 'Failed to fetch comments' });
   }
 });
@@ -251,20 +377,42 @@ router.get('/:id/comments', async (req: Request, res: Response): Promise<void> =
 // Post a comment
 router.post('/:id/comments', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { text, wallet, isAgent } = req.body;
-    if (!text) {
-      res.status(400).json({ error: 'Comment text is required' });
+    const { text, wallet, isAgent, gifUrl } = req.body;
+    if (!text && !gifUrl) {
+      res.status(400).json({ error: 'Comment text or GIF is required' });
       return;
     }
+
+    let marketId = req.params.id;
+    let market = await prisma.market.findUnique({ where: { id: marketId } });
+    if (!market) market = await prisma.market.findFirst({ where: { resolutionDetail: `kalshi:${marketId}` } });
+    if (!market) {
+      res.status(404).json({ error: 'Market not found' });
+      return;
+    }
+    marketId = market.id;
 
     const comment = await prisma.comment.create({
       data: {
         id: newId(),
-        marketId: req.params.id,
-        text,
+        marketId,
+        text: text || '',
+        gifUrl,
         wallet: wallet || (req.headers['x-wallet'] as string) || 'anon',
         isAgent: isAgent || false,
       },
+    });
+
+    // Broadcast in real-time
+    const { broadcastSocialEvent } = require('./ws');
+    broadcastSocialEvent(marketId, {
+      type: 'comment',
+      comment: {
+        ...comment,
+        isLiked: false,
+        isBookmarked: false,
+        likesCount: 0
+      }
     });
 
     res.status(201).json({ comment });

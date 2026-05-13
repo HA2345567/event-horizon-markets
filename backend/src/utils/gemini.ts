@@ -7,11 +7,14 @@ const API_KEY = process.env.GEMINI_API_KEY || '';
 const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 
 const client = new GoogleGenAI({
-  vertexai: true,
+  vertexai: false,
   apiKey: API_KEY,
 });
 
+const IS_AI_DISABLED = process.env.DISABLE_AI === 'true';
+
 export async function generateContent(prompt: string): Promise<string> {
+  if (IS_AI_DISABLED) return 'AI features are currently disabled.';
   try {
     const result = await client.models.generateContent({
       model: MODEL_NAME,
@@ -26,6 +29,7 @@ export async function generateContent(prompt: string): Promise<string> {
 }
 
 export async function generateJSON<T>(prompt: string): Promise<T> {
+  if (IS_AI_DISABLED) return {} as T;
   try {
     const result = await client.models.generateContent({
       model: MODEL_NAME,
@@ -67,4 +71,4 @@ export async function callGemini(prompt: string) {
 }
 
 
-export const geminiAvailable = () => !!API_KEY;
+export const geminiAvailable = () => !!API_KEY && !IS_AI_DISABLED;

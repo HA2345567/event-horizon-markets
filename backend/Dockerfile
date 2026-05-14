@@ -14,7 +14,9 @@ RUN bun install --frozen-lockfile
 COPY . .
 
 # Generate Prisma client
-RUN bun x prisma generate
+# Use a placeholder DATABASE_URL to prevent Prisma from failing during build if it checks the env
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+RUN bun prisma generate
 
 # Expose the port (GCP Cloud Run uses 8080 by default)
 EXPOSE 8080

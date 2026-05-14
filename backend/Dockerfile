@@ -4,6 +4,9 @@ FROM oven/bun:latest
 # Set working directory
 WORKDIR /app
 
+# Install system dependencies needed for Prisma
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
 # Copy package files
 COPY package.json bun.lock ./
 

@@ -1,11 +1,10 @@
 services:
   - type: web
     name: heliora-backend
-    env: node
+    env: docker
     plan: free
     rootDir: backend
-    buildCommand: bun install && bun x prisma generate && bun run build
-    startCommand: bun run start
+    dockerFilePath: Dockerfile
     envVars:
       - key: NODE_ENV
         value: production

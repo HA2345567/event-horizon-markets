@@ -28,7 +28,7 @@ services:
     publishDir: dist
     routes:
       - type: rewrite
-        src: /.*
+        src: /*
         dest: /index.html
 
 

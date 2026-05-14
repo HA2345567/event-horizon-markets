@@ -7,14 +7,14 @@ WORKDIR /app
 # Install system dependencies needed for Prisma
 RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
-# Copy package files
-COPY package.json bun.lock ./
+# Copy package files from the backend directory
+COPY backend/package.json backend/bun.lock ./
 
 # Install dependencies
 RUN bun install --frozen-lockfile
 
-# Copy the rest of the code
-COPY . .
+# Copy the rest of the backend code
+COPY backend/ .
 
 # Generate Prisma client
 # Use a placeholder DATABASE_URL to prevent Prisma from failing during build if it checks the env
